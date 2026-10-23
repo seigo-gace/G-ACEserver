@@ -13,6 +13,12 @@
 - GitHub Project #1のItem登録：**NOT_VERIFIED**（このRepo/Issues作成で自動登録されたとみなさない）。
 - Repoは現在Public。実機の非公開資料やSecretsを保存しない。
 
+## 追加確定要件（2026-10-23）
+
+Master決定：GitHubは開発管理のみに使用し、GserverのWeb/Bot/Storage/既存KB等の**通常運用はGitHub接続なしで成立**させる。Git由来の開発履歴はSource provenanceとして保持し、更新/受領とローカル通常検索を分離する。TGSは別Hostへの独立した通信依存。完成後にはRepoをPrivate化するが、今はPublicであり機密を登録しない。
+
+受入詳細は requirements/FINAL_ACCEPTANCE.md の横断必須条件で統一。設計変更以外のPC Source/Runtime・GitHub非依存実証・Private化はNOT_VERIFIED。PC Codex/限定Server AI投入はMasterのみが判断する。
+
 ## 次の実装単位
 GSR-S0-01 正本を統一→GSR-S1-01 既存PC実データ/サービスを対象限定で棚卸し→GSR-S1-04 既存Gserverコード照合→S2以降の完成条件を減らす。
 

@@ -10,6 +10,10 @@
 | F07 | Registry/evidence map | S0全体; S7-05 | 症状→Component→File→Test→Rollback |
 | F08 | Final Acceptance | S7-01..06 | 同時運用・負荷・障害・復元PASS |
 
+## 横断受入：GitHub非依存
+
+F01〜F04/F06に対しS1-04で実コードのGitHub必須依存を確認し、F08のS7-01/06でGitHub遮断時の起動・Web/Bot・認可付きStorage・受領済みKB検索/Current・ローカル復旧を実PC検証する。F05はTGS外部通信/有界spoolと復帰後読戻しの別証拠。Githubの開発管理とKB履歴のSource provenanceは維持。完成後Private化は実行/読戻しまでPENDING。
+
 ## デバッグ対応表に必須の列
 TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PATH+SHA / CONFIG (redacted) / DATA_STORE / LOG_ID / TEST_COMMAND+EXIT / ROLLBACK / OBSERVED_STATUS / OWNER。
 

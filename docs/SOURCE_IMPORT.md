@@ -9,6 +9,12 @@
 6. 動作中のアプリ/プロセスを即停止しない。Git上のFileTreeを既存ソースに合わせて段階的に更新する。
 7. 既存Contabo VPS経路（Actions→Host）をGserverへのリモート接続として勝手に使わない。新規Workflow/Token/MCPを作らない。
 
+## GitHub切断を前提とする運用設計（採用／未検証）
+
+GitHubは開発・更新管理のみに使用する。Gserver実行コードの起動/ログイン/通常操作/KB検索/復旧の経路にGitHub API・認証・Actions・clone/fetchの必須呼出しがないかS1-04で限定確認する。見つかった依存は既存ローカル資料・索引・設定を活用して通常運用から切離す。出典Git SHAは保持し、資料更新時に新履歴を入手する操作まで禁止しない。
+
+Gserverの実PCでGitHub通信を遮断したE2E結果が出るまでOFFLINE_RUNTIME=NOT_VERIFIED。TGS障害時は未送信/有界spoolとし、GitHubを代替配送路にしない。完成後のRepo Private化はPRIVATE_PENDING。
+
 ## 移行状態
 | 層 | 内容 | 判定 |
 | --- | --- | --- |
