@@ -29,7 +29,6 @@ HINTS = {
 }
 
 
-
 def discover_named_roots(bases: dict) -> dict:
     """Only discover named Gserver directories under bounded documented parent roots."""
     found = {}
