@@ -12,6 +12,15 @@
 | F07 | 人間/AIが障害とコードを追跡できる責務・ファイル・依存マッピング | 症状→サービス/ポート→コード→ログ→テスト→rollbackの逆引き |
 | F08 | 全機能の完成・障害復元を実PCで実証 | Source/CI/Runtime/Backupsを別証拠として全必須Gate ACCEPTED |
 
+## 横断必須条件：Docker/Compose-firstで複数Hostに展開可能（Master確定）
+
+- **F01/F02**：Gserverの本番アプリ/サービスは原則Dockerコンテナとして分離し、Docker Engine + Docker Composeによる作成・設定・起動・停止・更新・再起動・rollbackを可能にする。Windowsは最低限、Linux実行環境はWSLへ。Host側OS起動・mount・Firewall・Docker daemonだけをHost責務とし、例外のHostネイティブ常駐は実測依存/理由/Ownerを明示する。
+- **F02/F06/F07**：サービス毎のCompose構成、health/readiness、内部network/公開Port/認証、最小権限、CPU/RAM制限、永続volume/secret、ログと障害からの復旧をHostを跨いで同じ運用契約で管理する。追加ServerはContabo等を前提とするが、実機承認・アクセスは各Hostで個別に扱う。コンテナの移設・新規サービス追加で既存Serverの稼働が壊れないこと。
+- **F03/F04/F05**：コンテナの再作成やimage更新後もF:の原本、G:の実データ、既存Dev KB単一Current/rollback、TGS向けspoolとbackup証跡を失わない。volumes/mountと接続失敗は安全側に倒す。既存Contabo側Docker/TGSの変更を必須にしない。
+- **F08**：Gserver実PCでDocker/Composeの起動/再作成/別版差戻し、永続性、GitHub切断下の通常運用、Host固有設定と共通Compose契約の分離を実測して受入。将来Hostを実際に増設していない状態で「複数Host稼働済み」と捏造しない。Docker未導入であれば本条件はNOT_VERIFIEDのまま。
+- Kubernetes/Swarm/新たな集中コントロールプレーンの導入は現段階の必須条件ではない。**この方針でF01-F08を置き換えたりStage/タスクを増やさない。**
+
+
 ## 横断必須条件：GitHub非依存の通常運用（Master決定／実機未検証）
 
 F01〜F08の既存番号に含める。別の製品機能や追加Stageは作らない。

@@ -18,4 +18,9 @@
 | C13 | PC全資産・利用中サービスの依存表不完全 | S1全体 / S7-05 |
 | C14 | CPU/RAM/IO、24時間運用SLO未実測 | S6-04 / S7-04 |
 
+## コンテナ主体の決定で解消/進行する既存衝突（2026-10-23）
+
+C03/C04/C08/C09は、旧Python単独常駐やaaPanelを本番の既定に固定せず、**Docker Engine + Docker Compose主経路への段階移行**で扱う。Windows側は最小Host、WSL Docker Host上にサービスを分離し、既存Contabo Dockerとの運用契約を統一。現時点でGserverのDocker未導入は**未達の実装項目**であって、Podman採用・Docker廃止の決定ではない。サービス/データ/volume/port/rollbackを実証するまで対象衝突を解消済みにしない。追加Hostや外部公開、新しい管理サーバー・Tokenを無断作成しない。
+
+
 衝突解消は『既存実体→再利用→採用差分→影響→回帰・復元→証拠』で判断。既存データ/PCサービスの無断削除は禁止。

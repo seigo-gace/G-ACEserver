@@ -2,7 +2,7 @@
 
 > **Status: DESIGN_MIGRATION / RUNTIME_NOT_VERIFIED**
 
-Gserver is a self-hosted service platform on the owner's Windows PC and Ubuntu/WSL environment. The goal is one resource-efficient environment for web applications, bots, large-file storage, the existing G-ACE Development Knowledge Base, and integration with existing TGserver (TGS) for logs and encrypted off-site backups.
+Gserver is a Docker/Compose-first self-hosted service platform on the owner's Windows PC / WSL Ubuntu, designed to share an operational contract with existing Contabo Docker hosts and future additional servers. Its goal is one resource-efficient, extensible pseudo-cloud of web applications, independent services, storage, the existing G-ACE Development Knowledge Base, and TGserver (TGS) logging/backup integrations. The source design is adopted; Gserver Docker runtime is NOT deployed or verified.
 
 ## Start here
 
@@ -11,6 +11,14 @@ Gserver is a self-hosted service platform on the owner's Windows PC and Ubuntu/W
 3. Read [`docs/requirements/FINAL_ACCEPTANCE.md`](docs/requirements/FINAL_ACCEPTANCE.md) and [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
 4. Read the relevant [`docs/tasks`](docs/tasks) stage, inspect **existing source/runtime**, and implement one accepted change unit without replacing working components.
 5. Keep relevant Issue state and the current documentation synchronized with the actual code/validation evidence.
+
+## 採用：Dockerコンテナ主体・複数サーバー共通運用
+
+- **通常のWeb/API/KB/TGS接続等をDockerコンテナ単位に分割**し、各ホストはDocker Engine + Docker Composeを基本とする。ホスト依存（Windows/WSL起動、USB mount、Firewall、daemon）だけはHost管理。Contabo既存Docker環境を変更しない。
+- **GserverとContabo等の共通項は運用契約**（サービス定義、名前、health、ログ、resource bound、secretの渡し方、永続volume、backup/restore、更新/rollback）。Windowsのドライブパス等、物理Host固有の設定値まで同一化しない。
+- VS Code + WSL UbuntuをGserver操作入口とし、Windowsに開発用Node/Python/Dockerを二重導入する前提にしない。増設時もコンテナ/Compose単位で追加・分離し、必要以上の共通集中基盤を最初から作らない。
+- **現在のWSL実測:** `docker=NOT_FOUND`、`podman=/usr/bin/podman`、Compose・Docker daemon・本番コンテナの利用は未検証。Podman検出はDocker廃止の根拠にしない。新規インストール/既存サービス停止は別途安全な移行単位で実施する。
+- Copilot製ローカルPython HTTP試作の稼働は、Docker化済み/本番設計完了を示さない。正式設計と移行単位は[OVERVIEW](docs/architecture/OVERVIEW.md)と[S2](docs/tasks/S2.md)に統一。Telegram系5資産の採否は別作業。
 
 ## 採用：GitHub開発管理とGserver通常運用の分離
 
@@ -22,7 +30,7 @@ Gserver is a self-hosted service platform on the owner's Windows PC and Ubuntu/W
 ## Scope and safety
 
 - This is the **local PC Gserver**, not the separate Contabo VPS. Do not deploy, move, or modify unrelated VPS services.
-- Reuse existing nginx/aaPanel, G-ACE KB (`seigo-gace/gace-dev-kb`) and TGserver capabilities before creating a second implementation.
+- Identify existing nginx/aaPanel dependencies before retention or safe retirement; reuse the actual needed functions rather than retaining aaPanel as a mandatory final component. Reuse G-ACE KB (`seigo-gace/gace-dev-kb`) and TGserver capabilities before creating a second implementation.
 - Protect original KB/data and rollback evidence. Never treat a health endpoint as proof of a complete web/bot/KB/backup service.
 - Separate FACT, historical report, proposal, and UNKNOWN. Source/CI PASS is not runtime or restoration PASS.
 - The repository is currently **public**. Never commit secrets, private tokens, passwords, real user data, security incident artifacts, precise internal network details, or private inventories.
