@@ -15,6 +15,16 @@ GitHubは開発・更新管理のみに使用する。Gserver実行コードの�
 
 Gserverの実PCでGitHub通信を遮断したE2E結果が出るまでOFFLINE_RUNTIME=NOT_VERIFIED。TGS障害時は未送信/有界spoolとし、GitHubを代替配送路にしない。完成後のRepo Private化はPRIVATE_PENDING。
 
+## 読取専用PCソース調査の入口（GSR-S1-04／PC未実行）
+
+既存のWSL Ubuntuとインストール済みPython 3のみ使用する。Codex、追加トークン、GitHub通信、サービス停止を必要としない。GitHubからソースを入手済みの作業場所で実行するコマンド：
+
+    python3 scripts/pc_gserver_inventory.py
+
+過去の設計で言及された2箇所だけを対象に、対象コードの相対パス・SHA256・GitHub関連の要確認行番号/分類を**ローカル**の ~/.local/state/gserver/pc-source-inventory-*.json に保存する。ファイル本文・秘密・ログは収集せず、公開Repoには結果をコミットしない。存在しない/読めないパスはそれぞれ未確認として扱い、ほかの実コードまで不存在と断定しない。これはSourceの一次棚卸し用であり、PC RuntimeやGitHub遮断E2Eは別途要検証。
+
+テストは通常の開発環境で python3 -m unittest discover -s tests -v を使用。現PC上の実行は未確認。
+
 ## 移行状態
 | 層 | 内容 | 判定 |
 | --- | --- | --- |
