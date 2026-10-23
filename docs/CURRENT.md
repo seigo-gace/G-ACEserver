@@ -6,7 +6,7 @@
 
 ## 現在位置
 - NotionのF01～F08完成条件とS0～S7全46タスクをGitHub文書へ移行。
-- PC本体のソースコード・実サービス構成・Codex実行確認は未取込。以前のlocalhost health 200は過去の限定報告。
+- PC本体のソースコード・実サービス構成・Codex実行確認は未取込。以前のlocalhost health 200は過去の限定報告。2026-10-22の旧PC調査では既知候補でGserver名のディレクトリを確認できず、旧起動報告との配置差がある（現在のPC実測やソース不存在の証拠ではない）。
 - 既存KB正本：[seigo-gace/gace-dev-kb](https://github.com/seigo-gace/gace-dev-kb)／MVS／ModuleCatalog Current。旧kb-systemは別資産。
 - TGSは既存サーバーを利用する構想。Gserver→TGS実送受信・復元は未確認。
 - OSSセキュリティ/監視は既存機能と不足を突き合わせ、必要最小限を採用。

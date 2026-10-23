@@ -35,6 +35,15 @@ class PcGserverInventoryTest(unittest.TestCase):
             (root / "link").symlink_to(root / "real", target_is_directory=True)
             self.assertEqual(mod.inventory_root("sample", root / "link")["status"], "SYMLINK_ROOT_SKIPPED")
 
+    def test_bounded_name_discovery_finds_only_gserver(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "sub" / "GSERVER").mkdir(parents=True)
+            (root / "other").mkdir()
+            found = mod.discover_named_roots({"mock": root})
+            self.assertEqual(len(found), 1)
+            self.assertEqual(next(iter(found.values())).name, "GSERVER")
+
     def test_bounds_large_file(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

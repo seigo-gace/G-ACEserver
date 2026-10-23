@@ -16,6 +16,7 @@ CANDIDATES = {
     "g_drive_app": Path("/mnt/g/Project/Gserver/app"),
     "wsl_service": Path("/srv/gserver"),
 }
+DISCOVERY_BASES = {"g_projects": Path("/mnt/g/Project"), "web_apps": Path("/www/dk_project"), "srv": Path("/srv")}
 SUFFIXES = {".py", ".ps1", ".sh", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".php", ".html", ".css", ".service"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "data", "logs", "backups", "backup", "spool", "runtime", "dist", "build"}
 SKIP_NAMES = ("secret", "credential", "password", "token", "private", "keyfile", "apikey")
@@ -26,6 +27,26 @@ HINTS = {
     "git_network": re.compile(r"\bgit\s+(?:clone|fetch|pull)\b", re.I),
     "actions": re.compile(r"github[_-]actions|/actions/(?:workflows|runs)", re.I),
 }
+
+
+def discover_named_roots(bases: dict) -> dict:
+    """Only discover named Gserver directories under bounded documented parent roots."""
+    found = {}
+    for label, base in bases.items():
+        if base.is_symlink() or not base.is_dir():
+            continue
+        seen = 0
+        for parent, dirs, _ in os.walk(base, topdown=True, followlinks=False):
+            seen += 1
+            depth = len(Path(parent).relative_to(base).parts)
+            if seen > MAX_DIRS or depth >= 3:
+                dirs[:] = []
+                continue
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS and not (Path(parent) / d).is_symlink())
+            for name in dirs:
+                if name.lower() == "gserver" and len(found) < 8:
+                    found["discovered_" + label + "_" + str(len(found) + 1)] = Path(parent) / name
+    return found
 
 
 def inventory_root(label: str, root: Path) -> dict:
@@ -74,7 +95,7 @@ def inventory_root(label: str, root: Path) -> dict:
 
 def main() -> None:
     report = {"schema": 1, "time_utc": datetime.now(timezone.utc).isoformat(), "source_only": True,
-              "runtime_not_verified": True, "roots": [inventory_root(label, path) for label, path in CANDIDATES.items()]}
+              "runtime_not_verified": True, "roots": [inventory_root(label, path) for label, path in {**CANDIDATES, **discover_named_roots(DISCOVERY_BASES)}.items()]}
     folder = Path.home() / ".local" / "state" / "gserver"
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(folder, 0o700)
