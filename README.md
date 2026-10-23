@@ -24,3 +24,10 @@ Gserver is a self-hosted service platform on the owner's Windows PC and Ubuntu/W
 ## Provenance
 
 This repository is being initialized from an existing Notion design/task corpus (F01–F08, S0–S7, 46 tasks). Migrated documentation is a *design baseline*, not proof of deployment. Host inventory, source reconciliation, and exact tests remain tasks.
+
+## GitHub Current / task execution
+
+- **[CURRENT Issue #9](https://github.com/seigo-gace/G-ACEserver/issues/9)** is the entry point for every new ChatGPT development chat and PC Codex session.
+- Stage Issues: [S0 #1](https://github.com/seigo-gace/G-ACEserver/issues/1) · [S1 #2](https://github.com/seigo-gace/G-ACEserver/issues/2) · [S2 #3](https://github.com/seigo-gace/G-ACEserver/issues/3) · [S3 #4](https://github.com/seigo-gace/G-ACEserver/issues/4) · [S4 #5](https://github.com/seigo-gace/G-ACEserver/issues/5) · [S5 #6](https://github.com/seigo-gace/G-ACEserver/issues/6) · [S6 #7](https://github.com/seigo-gace/G-ACEserver/issues/7) · [S7 #8](https://github.com/seigo-gace/G-ACEserver/issues/8).
+- 46 task definitions live in `docs/tasks/S0.md`–`S7.md`; the Issues have completion checklists.
+- This public repository contains documentation only at bootstrap; the PC application source has **not** been imported or deployment-proven.

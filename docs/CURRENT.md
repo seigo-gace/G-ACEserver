@@ -25,3 +25,8 @@ GitHub現行Issueが実行状態、Notionは会議・歴史の参照。実機/�
 ## 実装済みの誤認禁止
 ドキュメントとタスク移行は実Web/Bot/KB/TGSのコード導入・Windowsでの稼働証明・外部公開・DR復旧の完了ではない。
 タスク完了証拠：TASK_ID、対象OS/Repo、Source path/SHA、変更diff、依存/競合、test exit、PC Runtime、TGS readback、rollback、NEXTをIssueへ記録する。
+
+## GitHub管理の実際の再開入口
+- [CURRENT Issue #9](https://github.com/seigo-gace/G-ACEserver/issues/9)を新チャット/PC Codexの入口とする。
+- Stage Issues [S0 #1](https://github.com/seigo-gace/G-ACEserver/issues/1)から[S7 #8](https://github.com/seigo-gace/G-ACEserver/issues/8)へ、46タスクをチェック項目として登録済み。
+- GitHub Project #1へのProjects v2項目追加は未検証。Project登録済みと誤記禁止。
