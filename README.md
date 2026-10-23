@@ -12,6 +12,13 @@ Gserver is a self-hosted service platform on the owner's Windows PC and Ubuntu/W
 4. Read the relevant [`docs/tasks`](docs/tasks) stage, inspect **existing source/runtime**, and implement one accepted change unit without replacing working components.
 5. Keep relevant Issue state and the current documentation synchronized with the actual code/validation evidence.
 
+## 採用：GitHub開発管理とGserver通常運用の分離
+
+- GitHubは開発管理・履歴・ソース配布専用。PC Gserverの通常起動、Web/API、Bot、G:ストレージ、既存KB検索/単一Current、ローカル復旧にはGitHub接続・認証・Actionsを要求しない。
+- Git由来のKB出典/Commit SHAは維持する。新しい資料の受領と、受領済みローカルCurrentの通常利用を区別する。
+- TGSは別Hostのログ・暗号化バックアップ先。TGSへの通信が止まってもローカル機能をGitHubへ迂回させず、上限付き保留・失敗表示にする（実PCでは未検証）。
+- 完成・公開履歴/秘密混入監査の後に、このGitHub RepoをPrivateへ変更する。今はPublicであり実機情報・秘密は置かない。
+
 ## Scope and safety
 
 - This is the **local PC Gserver**, not the separate Contabo VPS. Do not deploy, move, or modify unrelated VPS services.
