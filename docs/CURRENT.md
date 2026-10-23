@@ -1,5 +1,5 @@
 # CURRENT｜G-ACEserver
-**判定：DESIGN_MIGRATED / PC_SOURCE_NOT_IMPORTED / HOST_RUNTIME_NOT_VERIFIED**
+**判定：DESIGN_MIGRATED / PC_TRIAL_SOURCE_VERIFIED / FULL_RUNTIME_NOT_VERIFIED**
 
 ## 開発目的
 手元PCのC:/D:/F:/G:を適切に役割分担し、既存資産を再利用した省リソースWeb/Bot/ストレージ/既存G-ACE Dev KB/TGSログ・バックアップ統合サーバーを完成させる。Contabo VPSは別実体。
@@ -20,7 +20,9 @@ Master決定：GitHubは開発管理のみに使用し、GserverのWeb/Bot/Stora
 受入詳細は requirements/FINAL_ACCEPTANCE.md の横断必須条件で統一。設計変更以外のPC Source/Runtime・GitHub非依存実証・Private化はNOT_VERIFIED。PC Codex/限定Server AI投入はMasterのみが判断する。
 
 ## 次の実装単位
-GSR-S0-01 正本を統一→GSR-S1-01 既存PC実データ/サービスを対象限定で棚卸し→GSR-S1-04 既存Gserverコード照合→S2以降の完成条件を減らす。
+2026-10-23のWSL実機読戻しで旧Gserver試作（109行、SHA256=41e0df51db854fd562f748b4f8dbcc558d0052d2d52d2957f6d3a89b9f61e15c）のsource内容、localhost HTTP200、PID/port所有、既存Web/Redisの一部稼働を確認済み。Windows F:のG-ACE-KB関連既存フォルダも存在確認済み。**一方、正式Dev KB検索E2E、GserverのF01-F08全機能、TGS復元は未確認。** 旧kb-systemは放棄済みで再利用対象外。
+
+**NEXT：GSR-S2-01** — 既存Gserver試作とWeb入口、Linux実行配置、F:/G:データの責務と非破壊移行・差戻しを確定し、S2-02以降の必要実装へつなぐ。Telegram関連5資産は一つの保留グループとして扱い、移動・再利用判断は別作業に切り分ける。**これをGserver開発の停止条件にしない。**
 
 ## 作業判断の権限
 Master：最終目的／優先順位／不可逆影響／限定Server AI投入判断。

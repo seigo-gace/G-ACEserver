@@ -33,5 +33,19 @@ Web公開はまず既存nginx/aaPanel設定を読取り、Python HTTP試作と�
 監視はOS標準と既存Webから開始し、CrowdSec（防御候補）、Beszel（リソース監視候補）、Uptime Kuma（死活監視候補）から不足機能に適合する最小部品のみ採用。どれも未導入候補であり、導入済みとしない。
 `docs/tasks`に46単位の実行計画、`docs/architecture/CONFLICTS.md`に衝突台帳、`docs/architecture/TRACEABILITY.md`に要求追跡を置く。
 
+## Telegram関連5資産の保留グループ（Master決定、Gserver開発から分離）
+
+以下は、G:上で見つかった独立したTelegram系候補の**一つの管理グループ**として扱う。新しいGserverの機能として採用済みと誤認しない。
+
+- `GateApp-Bot`
+- `TGbot_grp_system`
+- `reserve_order_bot`
+- `guard_full_userbot`
+- `gacebot-profile`
+
+用途の確認・再利用・統廃合判断は**別作業**で行う。それまでGserverの統合・移設・依存チェック・新Bot実装の前提から除外し、既存のGit管理と起動パス/ログ/venvを変更しない。PCで一か所に見せる必要がある場合は、既存の実フォルダは移動せず、独立した閲覧用ショートカットだけをまとめる（実際の作成・動作はPCで別途検証）。これは既存F02の「複数Bot独立運用」という最終受入要件を変更せず、**どのBotを使うかの採用決定を保留するもの**である。
+
+放棄された旧`kb-system`はこのグループに含めず、正式KBは`seigo-gace/gace-dev-kb`とする。
+
 ## ファイル配置方針
 コード/venv/状態DBはLinux FS候補、G:は大容量データ、F:は原本。旧G:試験コードと提案されたLinux配置の実一致は不明なのでS1で現物確認後にFileTreeを確定。実行プロセス・port・秘密値は公開Repoへ記載しない。
