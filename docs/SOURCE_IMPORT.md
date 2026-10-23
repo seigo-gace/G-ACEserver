@@ -21,7 +21,7 @@ Gserverの実PCでGitHub通信を遮断したE2E結果が出るまでOFFLINE_RUN
 
     python3 scripts/pc_gserver_inventory.py
 
-過去の設計で言及された2箇所だけを対象に、対象コードの相対パス・SHA256・GitHub関連の要確認行番号/分類を**ローカル**の ~/.local/state/gserver/pc-source-inventory-*.json に保存する。ファイル本文・秘密・ログは収集せず、公開Repoには結果をコミットしない。存在しない/読めないパスはそれぞれ未確認として扱い、ほかの実コードまで不存在と断定しない。これはSourceの一次棚卸し用であり、PC RuntimeやGitHub遮断E2Eは別途要検証。
+過去の設計で言及された2箇所と、既存調査に現れた限られた上位フォルダ配下のGserver名ディレクトリだけを浅い階層・件数上限付きで対象に、対象コードの相対パス・SHA256・GitHub関連の要確認行番号/分類を**ローカル**の ~/.local/state/gserver/pc-source-inventory-*.json に保存する。ファイル本文・秘密・ログは収集せず、公開Repoには結果をコミットしない。存在しない/読めないパスはそれぞれ未確認として扱い、ほかの実コードまで不存在と断定しない。これはSourceの一次棚卸し用であり、PC RuntimeやGitHub遮断E2Eは別途要検証。
 
 テストは通常の開発環境で python3 -m unittest discover -s tests -v を使用。現PC上の実行は未確認。
 
