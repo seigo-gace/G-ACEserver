@@ -11,7 +11,7 @@
     trap - EXIT
     if (( started == 1 )); then
       phase=TEARDOWN
-      if ! sudo timeout 35 docker compose -p "$project" -f "$compose_file" down --timeout 10 >/dev/null; then
+      if ! sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 35 docker compose -p "$project" -f "$compose_file" down --timeout 10 >/dev/null; then
         echo 'ERROR=STAGING_TEARDOWN_FAILED'
         result=33
       fi
@@ -36,7 +36,7 @@
   phase=SUDO
   sudo -v || { echo 'ERROR=SUDO_ACCESS_FAILED'; exit 16; }
   phase=COMPOSE_VALIDATE
-  sudo timeout 25 docker compose -p "$project" -f "$compose_file" config --quiet || { echo 'ERROR=COMPOSE_INVALID'; exit 17; }
+  sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 25 docker compose -p "$project" -f "$compose_file" config --quiet || { echo 'ERROR=COMPOSE_INVALID'; exit 17; }
   phase=EXISTING_PROJECT_GUARD
   existing="$(sudo timeout 15 docker ps -aq --filter "label=com.docker.compose.project=$project")"
   [[ -z "$existing" ]] || { echo 'ERROR=STAGING_PROJECT_ALREADY_EXISTS'; exit 18; }
@@ -44,12 +44,12 @@
   before_redis="$(systemctl is-active redis-server.service || true)"
   before_site="$(systemctl is-active site_total.service || true)"
   phase=PULL_PYTHON_IMAGE
-  sudo timeout 240 docker compose -p "$project" -f "$compose_file" pull --quiet || { echo 'ERROR=STAGING_IMAGE_PULL_FAILED'; exit 19; }
+  sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 240 docker compose -p "$project" -f "$compose_file" pull --quiet || { echo 'ERROR=STAGING_IMAGE_PULL_FAILED'; exit 19; }
   phase=START_ISOLATED_CONTAINER
   started=1
-  sudo timeout 100 docker compose -p "$project" -f "$compose_file" up -d --wait --wait-timeout 50 || { echo 'ERROR=STAGING_HEALTH_FAILED'; exit 20; }
+  sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 100 docker compose -p "$project" -f "$compose_file" up -d --wait --wait-timeout 50 || { echo 'ERROR=STAGING_HEALTH_FAILED'; exit 20; }
   phase=VERIFY_HEALTH
-  id="$(sudo timeout 12 docker compose -p "$project" -f "$compose_file" ps -q gserver-staging)"
+  id="$(sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 12 docker compose -p "$project" -f "$compose_file" ps -q gserver-staging)"
   [[ -n "$id" ]] || { echo 'ERROR=STAGING_CONTAINER_MISSING'; exit 21; }
   host_ports="$(sudo timeout 15 docker port "$id")"
   [[ -z "$host_ports" ]] || { echo 'ERROR=STAGING_HOST_PORT_EXPOSED'; exit 22; }
