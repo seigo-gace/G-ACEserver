@@ -1,4 +1,12 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Gserver S2隔離実機検証 PASS｜初めて実コンテナ起動を実証
+
+- **証拠:** Masterから Windows PowerShell → `wsl.exe -d Ubuntu -u gace` で一括実機試験 `bash scripts/verify_pc_runtime.sh` の完全な出力を受領。試験時PC source `SOURCE_SHA=6db18616b81fc158a553ee455c38cca15358c2a6`。**Python unittest 60/60 PASS、UI挙動4/4 PASS**、旧原本SHA固定stagingは実Docker container Healthy / internal `STAGING_HTTP=200` / host ports NONE。新packaged imageは実Docker build成功、専用隔離Container Healthy、再作成・stop/startのhealth、Volume内sentinel永続化PASS。
+- **実Controller:** 違うimage IDへの更新→元image IDへrollback→stop/start→同じVolume sentinel維持を実Dockerで確認。`CONTROLLER_SMOKE=PASS;IMAGE_UPDATE_ROLLBACK=PASS;PERSISTENCE=PASS;HOST_PORTS=NONE`。結果 `SUBCHECK_VERIFY=PASS;RUNTIME_SMOKE=IMAGE_RECREATE_PERSISTENCE_OFFLINE`、`LOCAL_VERIFICATION_RECEIPT=SAVED`、最後に `VERIFY=PASS;SCOPE=ISOLATED_SOURCE_AND_PACKAGED_RUNTIME;F01_F08=NOT_COMPLETE`。試験専用コンテナ/Volumeはcleanupで削除、既存Host service回帰ガード含む。認証の問題は今回解消。
+- **SHA整合:** 検証時 `6db18616b81fc158a553ee455c38cca15358c2a6` からGithub最新main `bdf16abcc10866e7d4088605f0a12b0f5ff63a7e` までの差分は `AGENTS.md`、`docs/CURRENT.md`、`docs/requirements/FINAL_ACCEPTANCE.md` の**文書3ファイルだけ**。実行コード差分なし。そのため上記Runtime証拠は隔離Runtimeの現ソースに適用可能。ただし新機能/本番への証拠流用は不可。
+- **受入範囲:** GSR-S2-02の隔離Docker build/起動/volume永続化とGSR-S2-05の実コントローラー更新・旧版差戻し（同じアプリのfixture）は実機PASSへ昇格。完全なS2本番配置（ユーザー手元からアクセス可能なloopback listener/必要なcredentialと最低限のG: subtreeのみ承認済みでmount/WSL起動連動）やS3ストレージ実体・F04 KB/F05 TGS/F05 Backup&Restore/F08 E2Eは**未実装/未検証**。テスト用環境は終了しており、通常利用Gserver本体が常時起動したとは宣言しない。CIは未実行。
+- **最短Exact Next:** staging/隔離smokeを再度求めない。**VS Code/Cursor CLI-first**で利用するGserver本体の**ローカル限定**配置を、既存ポート/サービス/設定/セキュリティ競合を非破壊で照合したうえで実装・有効化して、実利用者の `start/status/logs/stop/rollback` を実機で検証する。既存HTML管理画面の拡張・Codex自動定期タスクは不要。その後、G:上の明示許可subtreeへの安全なStorage接続・読み書き、既存Dev KB実接続、TGS/暗号backupと隔離restore、WSL再起動/失敗復旧へ進む。検証受領後も同じテストを反復して進捗にしない。
+
 ## 2026-10-28 Windows/WSL実機ディスク監査｜前回の+37GB判断を撤回
 
 - **最優先の訂正:** PowerShell `Win32_LogicalDisk`実機readback: C:総容量 **117.86 GiB**、使用 **82.47 GiB**、空き **35.38 GiB**。D:総容量 **465.66 GiB**、使用 **48.98 GiB**、空き **416.68 GiB**。Masterの「整理後C:使用量約80GB」と同じ単位で比較した概算差は**約+2.47GiB**。CHATが「117GB使用し、約37GB増」と記録したのは**総容量を使用量と混同した誤り**で、ここに明確に撤回する。元80GBの測定時点/丸め/単位は未確認のため、増加原因や厳密な差分はこれ以上断定しない。
