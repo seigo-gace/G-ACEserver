@@ -10,9 +10,9 @@
     local result=$?
     trap - EXIT
     if (( started == 1 )); then
-      phase=TEARDOWN
       if ! sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 35 docker compose -p "$project" -f "$compose_file" down --timeout 10 >/dev/null; then
         echo 'ERROR=STAGING_TEARDOWN_FAILED'
+        phase=TEARDOWN
         result=33
       fi
     fi
@@ -22,6 +22,7 @@
       echo "VERIFY=FAIL;PHASE=$phase;EXIT_CODE=$result"
     fi
     printf '%s\n' 'PROJECT_END=Gserver' '========== GACE_RESULT_END =========='
+    exit "$result"
   }
   trap finish EXIT
   printf '%s\n' '========== GACE_RESULT_BEGIN ==========' 'PROJECT=Gserver' 'ACTION=STAGING_GSERVER_CONTAINER_SMOKE' 'ENV=WSL_UBUNTU'

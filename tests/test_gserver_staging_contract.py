@@ -29,9 +29,12 @@ class GserverStagingContract(unittest.TestCase):
         self.assertIn('HOST_PORTS=NONE', self.script)
 
     def test_compose_env_passed_via_sudo(self):
-        self.assertNotIn("sudo timeout", self.script)
-        self.assertIn('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout', self.script)
-        self.assertEqual(self.script.count('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout'), 5)
+        compose_calls = [line for line in self.script.splitlines() if "docker compose " in line]
+        self.assertEqual(len(compose_calls), 5)
+        for line in compose_calls:
+            self.assertIn('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout', line)
+        # Other Docker inspection calls legitimately use "sudo timeout".
+        self.assertIn("sudo timeout 15 docker ps", self.script)
 
     def test_contained_lifecycle(self):
         self.assertIn("STAGING_PROJECT_ALREADY_EXISTS", self.script)
@@ -52,6 +55,7 @@ class GserverStagingContract(unittest.TestCase):
     def test_gace_result_contract(self):
         for item in ("GACE_RESULT_BEGIN", "GACE_RESULT_END", "PROJECT_END=Gserver", "VERIFY=PASS", "VERIFY=FAIL"):
             self.assertIn(item, self.script)
+        self.assertIn('exit "$result"', self.script)
 
 if __name__ == "__main__":
     unittest.main()
