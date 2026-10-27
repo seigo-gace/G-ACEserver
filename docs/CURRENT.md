@@ -1,4 +1,12 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Master補正｜C: 80GB→117GB、使用量 +37GB
+
+- Masterの**明示した直前の整理後ベースラインはC:使用量約80GB**。現在は**使用量約117GB**、したがって **+37GBの使用量増加**。前回CHATは過去時点の空き34～35GBと現在の空き36GBを比較して「変化なし」と判断したが、これはベースラインを誤った判断で撤回する。現在の「空き約36GB」と容量全体の組合せは異なる時点/表示定義かもしれないため、現地でWindows `Get-Volume` / `Get-PSDrive`による総量・空き量・時点も照合して数値齟齬を解く。**容量増加が開発起因かは未確定**。
+- **最優先:** 約37GBの増加要因を非破壊・読み取り専用で特定。Windows C:の用途別内訳（`C:\Users\...`のアプリ/IDE拡張・ログ・キャッシュ、Windows更新、Windows\Installer等の既存システム領域）、既存WSL Ubuntu VHDXの実path/サイズ、WSL内部Docker/containerd images/volumes/build cache、Podmanの保存先、Cursor/VS Code/Codexの実データを**保存先とサイズを根拠付きで**調べる。大規模な`Get-ChildItem -Recurse`全ディスク探索や重い再indexは禁止、まず既知の大容量候補とFS reportに絞る。
+- **調査中:** 新規のDocker image build、依存二重導入、UI追加開発、大型キャッシュ生成を先行させない。不要な再インストールや「C:空き36GBだから安全」という結論を出さない。
+- **禁止:** `docker system prune`、`docker volume prune`、`wsl --unregister`、VHDXの移動・圧縮、Windows Update/Installer等の直接削除、既存マウント/G:/F:原本やユーザーデータ削除。解消案は容量の実測/安全性/rollback・依存を揃えてから採用、データ破壊を伴う操作はMaster別承認。
+- **CodexのExact Next:** 実行中のGserver作業を安全なチェックポイントで区切り、`+37GB`の読取調査を最優先し、候補ごとの占有GB/更新時期/元の場所と増加時期の比較を提示。現在のGserver S2 runtime未実証は保留として記録し、容量保護方針を適用してから開発再開。
+
 ## 2026-10-28 Master修正｜単独CLI運用・C/D配置/容量優先
 
 - 最新のMaster意思は **単独使用でVS Code/Cursor操作のみ**。管理者Web画面は必要なし。既存UIは除去のために工数を掛けないが、これ以上管理UI機能を盛らず、CLI/Composeで起動/停止/ログ/復旧を完結させる。必要なWeb/APIは維持。F01～F08の完成条件は[FINAL_ACCEPTANCE.md](requirements/FINAL_ACCEPTANCE.md)で修正。
