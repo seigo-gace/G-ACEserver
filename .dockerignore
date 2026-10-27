@@ -1,0 +1,6 @@
+**
+!app/
+!app/gserver.py
+!app/index.html
+!app/ui.js
+!Dockerfile

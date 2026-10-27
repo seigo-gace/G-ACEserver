@@ -1,4 +1,18 @@
 # CURRENT｜G-ACEserver
+## 2026-10-27 Codex実測・S2ソース実装（現セッション）
+
+- **Owner / Tasks:** Codex、GSR-S1-04/S2-01/S2-02/S2-05の実装差分。開始時main `8e2dcaa19da67f04feb5f9ea2608d62d8bcbe497`。F01–F08 / 46タスクは未完了のまま。旧記録は履歴として保持する。
+- **Source:** 既存試作SHA一致を確認し、原本を変更せず`app/gserver.py`へ取り込み。stdlibを再利用し、ローテーションログ、認証必須状態API、未mount時503、状態確認UI、接続数/timeout上限を追加。digest固定Dockerfile、永続volumeのCompose、image ID固定の起動/停止/更新/差戻し、更新中断journal/recover、隔離再作成・ログ永続性smokeを実装。[S2実装契約](architecture/RUNTIME_S2.md)。公開port・実データmount・秘密の作成はなし。
+- **Local tests:** WSL上の全37 Python unittest PASS（既存staging10件を含む）。bash構文とCompose config PASS。HTTPテストは一時loopbackサーバーと合成認証fixture、ライフサイクルはDocker境界mock。コンテナ起動の証拠ではない。
+- **PC Runtime:** WSL/Compose v5.6.1、元ソースSHA一致、既存4サービスactive、旧8765待受なし。staging実行は`SUDO_ACCESS_FAILED`/exit16で停止、Docker socketへの非sudoアクセスも拒否。コンテナ起動・ログ永続性・image rollback・再起動後稼働は **NOT_VERIFIED**。管理者認証を迂回せず、既存サービスへの操作なし。
+- **CI:** この変更のCIはNOT_RUN。新Workflowは作成していない。
+- **TGS / KB:** 正式Repoの既存契約を読取照合。KBのMVS/単一Currentを再利用し、TGS ZERO/vNextを区別する。Gserverの接続権限・受領先・実送受信は未確認。新Reader/新検索基盤/Project ID流用/既存秘密コピーなし。
+- **Backup/Restore:** NOT_IMPLEMENTED / NOT_VERIFIED。永続volumeの再作成試験はバックアップ復元証明と扱わない。
+- **Rollback:** 元PCソース/設定/データ/サービスは無変更。新ソースは導入前。controllerは前imageへ差戻し、途中中断はjournalから`recover`、volume削除なし。ただし実Dockerで未実証。
+- **Exact Next:** Master端末の既存sudo認証で`smoke_gserver_staging.sh`を実行→`smoke_gserver_runtime.sh`で固定image/永続log/recreate/offline検証→実ログに基づく修正→認証/ingress/drive境界の承認済み設定による正式配置。続いてS3認可ファイル操作、S4既存KB、S5既存TGS+暗号backup/隔離restore、S6/S7監視・Windows再起動・全E2E。本人操作依頼済み、非同期ジョブは予約していない。
+
+以下は前回までの履歴。
+
 > **最新2026-10-27 23:00 JST：MasterがGserver開発を既存VS Code (WSL Ubuntu) Codexへ単発委任。** 完全な現況、未完了の隔離起動10テスト、本体/S3～S7/正式Dev KB/TGS完成条件、保護範囲は [Codex引継ぎ](CODEX_HANDOFF_2026-10-27.md) と [Issue #9](https://github.com/seigo-gace/G-ACEserver/issues/9) の冒頭を正本とする。**Docker Engine/Compose host基盤は実機PASS、Gserver本体の最新staging修正版はPC未実行**。旧見出しにある「Docker未導入」は10/23時点の履歴であり現況ではない。バックグラウンドCodex/自動レビュー/追加AI起動は許可されていない。
 
 **判定：DESIGN_MIGRATED / PC_TRIAL_SOURCE_VERIFIED / FULL_RUNTIME_NOT_VERIFIED**
