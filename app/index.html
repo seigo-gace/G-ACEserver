@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Gserver 管理</title>
+<style>body{font:18px system-ui;max-width:800px;margin:40px auto;padding:20px;background:#f5f7fa;color:#183046}section{background:white;padding:24px;margin:20px 0;border-radius:12px}button,input{font:inherit;padding:10px;margin:6px}pre{white-space:pre-wrap}label{display:block}</style>
+<h1>Gserver 管理</h1><p>この画面では稼働状態を確認できます。</p>
+<section><h2>接続</h2><form id="connect"><label>管理用認証値 <input id="credential" type="password" autocomplete="off" required></label><button>状態を確認</button><button type="button" id="logout">接続を解除</button></form><p id="message" role="status">管理者が用意した認証値で接続してください。</p></section>
+<section><h2>サービス状態</h2><pre id="status">未確認</pre><button id="refresh">再確認</button></section>
+<section><h2>保存領域</h2><pre id="storage">未確認</pre><p>接続されていない場合は、ドライブの接続を確認して再確認してください。現在は容量確認のみ利用できます。</p></section>
+<section><h2>開発中の機能</h2><p>KB検索・Bot・TGS連携・バックアップ復元は、まだこの画面から利用できません。</p></section>
+<section><h2>ファイル</h2><p>接続を許可された保存領域だけを表示します。現在は閲覧とダウンロードに対応しています。</p><p id="file-path">/</p><button id="files-back">上のフォルダーへ</button><button id="files-refresh">一覧を更新</button><ul id="file-list"></ul><button id="files-next" disabled>次のページ</button><p id="file-message" role="status">未確認</p></section>
+<script src="/ui.js" defer></script></html>

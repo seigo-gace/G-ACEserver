@@ -1,6 +1,8 @@
 # G-ACEserver
 
-> **Status: DESIGN_MIGRATION / RUNTIME_NOT_VERIFIED**
+> **Status: S2_SOURCE_IMPLEMENTED / CONTAINER_RUNTIME_NOT_VERIFIED**
+
+The existing Python prototype is now imported and packaged with an immutable-base Dockerfile, persistent bounded logs, an authenticated status UI/API, and offline Compose lifecycle/rollback tooling. See [current evidence](docs/CURRENT.md) and [runtime operation boundary](docs/architecture/RUNTIME_S2.md). The base deployment exposes no host ports and mounts no original data. Container execution is pending local sudo authentication; this is not final production acceptance.
 
 Gserver is a Docker/Compose-first self-hosted service platform on the owner's Windows PC / WSL Ubuntu, designed to share an operational contract with existing Contabo Docker hosts and future additional servers. Its goal is one resource-efficient, extensible pseudo-cloud of web applications, independent services, storage, the existing G-ACE Development Knowledge Base, and TGserver (TGS) logging/backup integrations. The source design is adopted; Gserver Docker runtime is NOT deployed or verified.
 
@@ -17,7 +19,7 @@ Gserver is a Docker/Compose-first self-hosted service platform on the owner's Wi
 - **通常のWeb/API/KB/TGS接続等をDockerコンテナ単位に分割**し、各ホストはDocker Engine + Docker Composeを基本とする。ホスト依存（Windows/WSL起動、USB mount、Firewall、daemon）だけはHost管理。Contabo既存Docker環境を変更しない。
 - **GserverとContabo等の共通項は運用契約**（サービス定義、名前、health、ログ、resource bound、secretの渡し方、永続volume、backup/restore、更新/rollback）。Windowsのドライブパス等、物理Host固有の設定値まで同一化しない。
 - VS Code + WSL UbuntuをGserver操作入口とし、Windowsに開発用Node/Python/Dockerを二重導入する前提にしない。増設時もコンテナ/Compose単位で追加・分離し、必要以上の共通集中基盤を最初から作らない。
-- **現在のWSL実測:** `docker=NOT_FOUND`、`podman=/usr/bin/podman`、Compose・Docker daemon・本番コンテナの利用は未検証。Podman検出はDocker廃止の根拠にしない。新規インストール/既存サービス停止は別途安全な移行単位で実施する。
+- **現在のWSL実測:** Docker Engine導入済み（引継ぎ29.9.2）、Compose v5.6.1を現セッションで確認。既存Podman等は維持。本体の修正後Docker起動はsudo認証待ちで未検証。10/23の`docker=NOT_FOUND`は過去記録。
 - Copilot製ローカルPython HTTP試作の稼働は、Docker化済み/本番設計完了を示さない。正式設計と移行単位は[OVERVIEW](docs/architecture/OVERVIEW.md)と[S2](docs/tasks/S2.md)に統一。Telegram系5資産の採否は別作業。
 
 ## 採用：GitHub開発管理とGserver通常運用の分離
@@ -45,4 +47,4 @@ This repository is being initialized from an existing Notion design/task corpus 
 - **[CURRENT Issue #9](https://github.com/seigo-gace/G-ACEserver/issues/9)** is the entry point for every new ChatGPT development chat and PC Codex session.
 - Stage Issues: [S0 #1](https://github.com/seigo-gace/G-ACEserver/issues/1) · [S1 #2](https://github.com/seigo-gace/G-ACEserver/issues/2) · [S2 #3](https://github.com/seigo-gace/G-ACEserver/issues/3) · [S3 #4](https://github.com/seigo-gace/G-ACEserver/issues/4) · [S4 #5](https://github.com/seigo-gace/G-ACEserver/issues/5) · [S5 #6](https://github.com/seigo-gace/G-ACEserver/issues/6) · [S6 #7](https://github.com/seigo-gace/G-ACEserver/issues/7) · [S7 #8](https://github.com/seigo-gace/G-ACEserver/issues/8).
 - 46 task definitions live in `docs/tasks/S0.md`–`S7.md`; the Issues have completion checklists.
-- This public repository contains migrated documentation plus a read-only PC source inventory helper and its tests. Existing PC application code has **not** been imported, run, or deployment-proven.
+- This public repository contains the adapted existing PC application, packaging, lifecycle tools and tests. Original PC configuration/data/logs are excluded. Production deployment and final acceptance remain unverified.

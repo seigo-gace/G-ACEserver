@@ -1,0 +1,32 @@
+# Immutable local image ID is supplied by gserverctl. No automatic registry access.
+services:
+  gserver:
+    image: ${GSERVER_IMAGE:?immutable_image_required}
+    pull_policy: never
+    network_mode: none
+    read_only: true
+    init: true
+    user: "65534:65534"
+    volumes:
+      - state:/var/lib/gserver
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.50
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "3"
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=2); assert r.status==200; r.close()"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+volumes:
+  state:
