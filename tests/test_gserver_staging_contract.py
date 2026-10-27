@@ -61,6 +61,7 @@ class GserverStagingContract(unittest.TestCase):
         self.assertIn('user: "65534:65534"', self.compose)
         self.assertNotIn('target: /logs', self.compose)
         self.assertNotIn('source: /mnt/g/Project/Gserver/logs', self.compose)
+        self.assertIn('ERROR=STAGING_LOG_NOT_WRITABLE', self.script)
 
     def test_public_repo_secret_safety(self):
         for item in ("secret:", "password:", "token:", "Authorization:"):
