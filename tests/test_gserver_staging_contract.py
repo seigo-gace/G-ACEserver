@@ -30,7 +30,7 @@ class GserverStagingContract(unittest.TestCase):
 
     def test_compose_env_passed_via_sudo(self):
         compose_calls = [line for line in self.script.splitlines() if "docker compose " in line]
-        self.assertEqual(len(compose_calls), 5)
+        self.assertEqual(len(compose_calls), 6)
         for line in compose_calls:
             self.assertIn('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout', line)
         # Other Docker inspection calls legitimately use "sudo timeout".
