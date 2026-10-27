@@ -1,10 +1,19 @@
 # Gserver 最終完成条件｜F01～F08
 文書状態：GOAL FIXED / RUNTIME NOT VERIFIED。
 
+## Master運用・保存先の確定補正（2026-10-28）
+
+- **唯一の管理利用者はMaster本人。** Gserverの管理・保守は既存の **VS Code / Cursor からWSL Ubuntuへ接続し、Terminal / CLI / Compose** で行う。管理者向けWebダッシュボードの新規開発・画面拡張・ブラウザE2Eは完成要件ではない。すでに作ったUIは廃棄のための作業を増やさず、依存がなければ維持してよいが、今後の優先開発・受入をUIに寄せない。Web/API機能自体は必要な製品機能として維持。
+- **C: SSD（公称約118GiB）はWindows最小運用に限定。D: HDD内の既存 `D:\WSL\Ubuntu` にWSL2の `ext4.vhdx` は移設済み。** 無断でWSLを再移設・新規インストール・二重登録・削除しない。Docker Engine/ComposeもこのWSL内に導入済み。Linux Dockerの現物 `/var/lib/docker`, `/var/lib/containerd` の配置・使用量、Windows側のVHDX保存先、C:/D:空き容量を**read-onlyで照合**してから、新しい重いimage/build/cacheを増やす。Docker Engine v29のcontainerd image storeを見落とさない。
+- **速度優先と容量保護の両立:** D:はHDDなのでSSDと同等の速度ではない。Linuxビルド/Git/npmの高頻度I/OをWindows driveマウント(`/mnt/d`/`/mnt/g`)越しに走らせる速度問題と、D:上のWSL ext4内で走らせる性能を混同しない。ホットなコード/一時ビルドは既存WSL ext4領域を優先しつつ、現有Gserver親Project/Repoの正本・既存配置・Parent Worktree境界を守り、計測・差分確認なしで複製や移動しない。G:は既存資産/容量データ、F:はKB原本の保護を継続。
+- **C:容量について:** Masterの最新申告は「約117GB表示、空き約36GB」。既往のC:空き約34～35GBと近いが、今回DockerによるC:増加を実証していない。空き36GBを無条件に安全・危険と決めず、Windows update/一時ファイル/VS Code/Cursor/WSL関連の用途別増加を差分測定し、容量を食う追加機能・二重runtime・Web UIの構築を避ける。**原本/キャッシュ/volumeを推測で消さない。**
+- F01～F08/既存46タスクの番号を変えず、旧タスク文中「管理UI必須」や「UIボタン操作」は今回のMaster明示決定を優先して **CLIの操作・復旧導線による受入**に読み替える。HTML UI維持のためのCI・依存追加・工数は不要。安全・認可・復元/証跡の要件は緩めない。
+
+
 | ID | 完成地点 | 受入条件 |
 | --- | --- | --- |
 | F01 | C:はWindows最小Host、D:のWSLでWeb/Bot/KBを稼働し、WindowsとLinuxに不要なNode/Pythonを二重常設しない | 実行依存の照合、実OS起動、冗長プロセスなし |
-| F02 | nginx/aaPanel等既存資産の再利用とWeb/API/管理UI/複数Botの独立運用 | UIの戻る/変更/失敗復旧を含む実利用操作と同時稼働 |
+| F02 | 必要なWeb/APIと既存Botの独立運用。管理はVS Code/Cursorのターミナル/CLIを第一経路とし、Web管理画面は必須としない | CLIで起動・停止・変更・状態/ログ確認・失敗復旧を行えること、必要なWeb/API/Botの実動作 |
 | F03 | G:大容量の認可付き保存と、F:にある既存KB原本の保護 | 一覧/送受信/更新/削除/容量管理、USB断・権限外操作の防御 |
 | F04 | G-ACE Dev KBのGserver移行、既存MVS（BM25/Vector/Hybrid/KG/MCP）と単一Current、ModuleCatalog受領、Rollback/Deep Healthの維持 | コピー・索引・検索・受領/ACTIVE・旧履歴・復旧のE2E |
 | F05 | TGSにWeb/Bot/KBログ原文、検索索引、ファイル・暗号化バックアップを保存 | TGS実送信→実ダウンロード→SHA/復号→隔離復元 |
@@ -28,7 +37,7 @@ F01〜F08の既存番号に含める。別の製品機能や追加Stageは作ら
 1. **F01〜F04/F06：** GitHub接続、GitHub OAuth/API/Actions、GitHubへのclone/fetchがなくてもWindows/WSL起動、Web/API、Bot、G:の認可付きファイル操作、既存KB検索・単一Current・ローカル復旧が使えること。新バージョン取得・新Git履歴取り込みは通常利用と別の更新操作にする。
 2. **F04：** Git由来履歴のSource/Commit SHAを失わず、受領済みローカル資料と索引でBM25/Vector/Hybrid/KG/MCP検索、Deep Health、rollbackを行う。既存のModuleCatalog受領/ACTIVE契約を変えない。
 3. **F05：** TGSとの実通信はGitHubとは独立した外部依存。TGSが使えない間は保管上限付きspoolと未送信/失敗状態を持ち、復帰後の再送・読戻し・隔離復元を別途実証する。TGS障害中のF05をPASSとしない。
-4. **F08：** PCでGitHubへの通信だけを遮断し、既存のWindows/WSL起動・Web/UI/API・Bot・Storage認可・KB検索/Current/ローカル復旧を代表操作で実証する。GitHubに接続した通常時との差分を記録し、TGSとの接続状態を混同しない。遮断試験未実施なら最終受入は未完了。
+4. **F08：** PCでGitHubへの通信だけを遮断し、既存のWindows/WSL起動・Web/API/CLI・Bot・Storage認可・KB検索/Current/ローカル復旧を代表操作で実証する。GitHubに接続した通常時との差分を記録し、TGSとの接続状態を混同しない。遮断試験未実施なら最終受入は未完了。
 5. **完成後の出口：** F08受入後、公開Repoに秘密/個人データ混入がないことと既存連携への影響を監査し、GitHub RepoをPrivate化して設定を読戻す。それまではPUBLIC / PRIVATE_PENDINGと記録する。
 
 ここに記載した内容は採用済み要件であり、既存PCコードの適合、GitHub遮断試験、Private化の実施証拠ではない。

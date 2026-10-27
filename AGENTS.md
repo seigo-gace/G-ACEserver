@@ -1,6 +1,8 @@
 # G-ACEserver｜Codex 実行入口
 > **2026-10-27 Master明示委任｜Gserver開発継続:** [Codex実行引継ぎ](docs/CODEX_HANDOFF_2026-10-27.md) をまず参照し、現在の実機状態・再開点・最終F01～F08・保護境界を確認する。1回の対話セッションでGserver実装と検証を継続する許可であり、定期実行/別AI起動/本番Host変更の許可ではない。古いCurrent記録より新しい実測を優先する。
 
+> **2026-10-28 Master最新変更:** 本人だけがVS Code/CursorからWSLを管理。**管理用Web UIの追加開発/受入は不要**（Web/APIは必要な機能のみ）。D:\WSL\UbuntuへWSL本体は既存移設済み。C:容量保護とD: HDDの速度劣化に注意し、Docker Engine 29の`/var/lib/docker`/`/var/lib/containerd`とC/D実使用をread-only確認、不要な二重依存・image/cache増殖を抑制。前の「管理UI必須」指示より今回のMaster意思を優先。詳細は[完成条件](docs/requirements/FINAL_ACCEPTANCE.md)。
+
 ## 読込順
 1. [README.md](README.md) → [docs/CURRENT.md](docs/CURRENT.md) → 今回の GitHub Issue／[46タスク](docs/tasks/S0.md)
 2. [G-ACE server-core Manifest](https://github.com/G-ACE-inc/server-core/blob/main/operations/github-project-rule-plane.json) → [SERVER_AI #16](https://github.com/G-ACE-inc/server-core/issues/16) → アクセスできる場合のみGitHub Project #1 のGserver Current

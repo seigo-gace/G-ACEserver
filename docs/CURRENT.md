@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Master修正｜単独CLI運用・C/D配置/容量優先
+
+- 最新のMaster意思は **単独使用でVS Code/Cursor操作のみ**。管理者Web画面は必要なし。既存UIは除去のために工数を掛けないが、これ以上管理UI機能を盛らず、CLI/Composeで起動/停止/ログ/復旧を完結させる。必要なWeb/APIは維持。F01～F08の完成条件は[FINAL_ACCEPTANCE.md](requirements/FINAL_ACCEPTANCE.md)で修正。
+- **PCの確定既往:** C SSD約118GiB(前回空き約34～35GB、Master最新申告空き36GB)、D HDD内 `D:\WSL\Ubuntu`にWSL ext4.vhdx既存配置済み（当時約6.67GiB）。WSLとDockerを勝手に再配置しない。Docker Engine29.9.2はWSL内。docker/containerdの使用先、Linux mountと実Windowsディスク・image容量の2026-10-28時点readbackは **NOT_VERIFIED**。
+- D: HDD上のWSL ext4領域と`/mnt/d`/`/mnt/g`のcross-filesystem I/O性能差を現物で評価し、既存親Project Git/Worktree境界を崩さず必要最小の配置最適化を行う。Docker cache/build imageの不要増加を抑制。実データ削除・Docker prune・rootdir移設・WSL VHDX移設は別途検証/権限条件まで禁止。
+- **Exact Next (Codex):** 管理UI開発を止め、C/D空きと`/var/lib/docker`/`/var/lib/containerd`/WSL VHDXの保存先を読取計測 → 必要なS2 CLI・実機runtimeの受入 → G: Storage・正式Dev KB・TGS・隔離復元の未実装を削減。新規管理UI工数のために完成を遅らせない。Codexは時間指定自律ジョブ/別AIの起動禁止。
+
 ## 2026-10-28 Codex継続｜S2差戻し修正・S3読取実装
 
 - Owner=Codex。再開HEAD `28281a6b516f7059df65ce1ce8ae933076a1d34a`、検証プロセスなしを確認して変更再開。旧HEADの結果が後から届いた場合は、そのHEADの証拠として扱い、新しい実装のPASSへ転用しない。
