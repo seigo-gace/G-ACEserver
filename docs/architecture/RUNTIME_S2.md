@@ -24,6 +24,8 @@ Storage endpoints are still read-only capacity checks. Missing mounts or stat fa
 
 `python3 -m unittest discover -s tests -v` covers live temporary loopback HTTP, authentication failures, missing/disappearing storage, secret-safe request logging, UI assets, and lifecycle failure/rollback with a mocked Docker boundary. Those tests are not Docker runtime evidence.
 
+`bash scripts/verify_pc_runtime.sh` runs both isolation checks in one foreground command with a single result envelope. It never installs services or schedules jobs.
+
 `bash scripts/smoke_gserver_staging.sh` verifies the original source in the existing isolated staging container. `bash scripts/smoke_gserver_runtime.sh` builds the packaged image, starts an isolated dedicated project, verifies persistent logs across container recreation, stops/starts it with no external network, checks existing services, and removes only the newly created test project's containers/volume. It refuses to reuse pre-existing test containers or volumes. Build images/cache are retained; there is no prune. This test does not deploy production or prove real backup restore.
 
 For production rollback, the controller activates the previous local image against the same volume. No data migration is currently performed. Once mutable application schemas are added, a compatible snapshot/restore gate must precede update; image rollback alone is not data rollback.

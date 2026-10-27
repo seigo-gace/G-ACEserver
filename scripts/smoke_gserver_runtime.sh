@@ -6,18 +6,23 @@
   project=gace-gserver-runtime-smoke
   compose_file="$PWD/deploy/compose.gserver.yaml"
   started=0
-  image_id_file="$(mktemp)"
+  image_id_dir="$(mktemp -d)"
+  image_id_file="$image_id_dir/image"
   phase=PRECHECK
   finish() {
     result=$?
     trap - EXIT
     if (( started )); then
+      if (( result != 0 )); then
+        sudo -n env GSERVER_IMAGE="$GSERVER_IMAGE" timeout 15 docker compose -p "$project" -f "$compose_file" logs --no-color --tail 30 || true
+      fi
       if ! sudo -n env GSERVER_IMAGE="$GSERVER_IMAGE" timeout 35 docker compose -p "$project" -f "$compose_file" down --volumes --timeout 10; then
         result=33
         phase=CLEANUP
       fi
     fi
     rm -f -- "$image_id_file"
+    rmdir -- "$image_id_dir"
     if (( result == 0 )); then
       echo 'VERIFY=PASS;RUNTIME_SMOKE=IMAGE_RECREATE_PERSISTENCE_OFFLINE;PRODUCTION_ACCEPTANCE=NOT_VERIFIED'
     else
