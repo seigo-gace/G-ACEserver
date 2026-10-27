@@ -1,18 +1,17 @@
 # CURRENT｜G-ACEserver
-## 2026-10-28 Master補正｜C: 80GB→117GB、使用量 +37GB
+## 2026-10-28 Windows/WSL実機ディスク監査｜前回の+37GB判断を撤回
 
-- Masterの**明示した直前の整理後ベースラインはC:使用量約80GB**。現在は**使用量約117GB**、したがって **+37GBの使用量増加**。前回CHATは過去時点の空き34～35GBと現在の空き36GBを比較して「変化なし」と判断したが、これはベースラインを誤った判断で撤回する。現在の「空き約36GB」と容量全体の組合せは異なる時点/表示定義かもしれないため、現地でWindows `Get-Volume` / `Get-PSDrive`による総量・空き量・時点も照合して数値齟齬を解く。**容量増加が開発起因かは未確定**。
-- **最優先:** 約37GBの増加要因を非破壊・読み取り専用で特定。Windows C:の用途別内訳（`C:\Users\...`のアプリ/IDE拡張・ログ・キャッシュ、Windows更新、Windows\Installer等の既存システム領域）、既存WSL Ubuntu VHDXの実path/サイズ、WSL内部Docker/containerd images/volumes/build cache、Podmanの保存先、Cursor/VS Code/Codexの実データを**保存先とサイズを根拠付きで**調べる。大規模な`Get-ChildItem -Recurse`全ディスク探索や重い再indexは禁止、まず既知の大容量候補とFS reportに絞る。
-- **調査中:** 新規のDocker image build、依存二重導入、UI追加開発、大型キャッシュ生成を先行させない。不要な再インストールや「C:空き36GBだから安全」という結論を出さない。
-- **禁止:** `docker system prune`、`docker volume prune`、`wsl --unregister`、VHDXの移動・圧縮、Windows Update/Installer等の直接削除、既存マウント/G:/F:原本やユーザーデータ削除。解消案は容量の実測/安全性/rollback・依存を揃えてから採用、データ破壊を伴う操作はMaster別承認。
-- **CodexのExact Next:** 実行中のGserver作業を安全なチェックポイントで区切り、`+37GB`の読取調査を最優先し、候補ごとの占有GB/更新時期/元の場所と増加時期の比較を提示。現在のGserver S2 runtime未実証は保留として記録し、容量保護方針を適用してから開発再開。
+- **最優先の訂正:** PowerShell `Win32_LogicalDisk`実機readback: C:総容量 **117.86 GiB**、使用 **82.47 GiB**、空き **35.38 GiB**。D:総容量 **465.66 GiB**、使用 **48.98 GiB**、空き **416.68 GiB**。Masterの「整理後C:使用量約80GB」と同じ単位で比較した概算差は**約+2.47GiB**。CHATが「117GB使用し、約37GB増」と記録したのは**総容量を使用量と混同した誤り**で、ここに明確に撤回する。元80GBの測定時点/丸め/単位は未確認のため、増加原因や厳密な差分はこれ以上断定しない。
+- WSL distro登録の実物: `Ubuntu`, `\\?\D:\WSL\Ubuntu\ext4.vhdx`、**10.13GiB**。D:へのWSL移設は既にできている。Ubuntu内のDocker `DockerRoot=/var/lib/docker`、`docker system df`: Images **193.9MB**、Build Cache **191.3MB**、Containers **0**、Volumes **0**。`df -h /`: WSL rootの使用約**8.0GiB**。**Dockerの大量データがC:を約37GB消費したという仮説は否定**。ただし物理C:の全ファイル増減の時系列証拠はない。
+- 観測したC:内候補サイズ（占有容量であり、最近の増加分ではない）: `hiberfil.sys` **7.95GiB**、Windows Update download **4.06GiB**、VS Code roaming **2.46GiB**、VS Code extensions **1.63GiB**、Codex `.codex` **1.12GiB**、User Temp **0.83GiB**、Cursor Roaming **0.25GiB**、Docker Local **0.04GiB**。重要データ/既存開発の作業状態を含みうるので推測で削除しない。
+- **NEXT:** Codexへの「+37GB緊急原因調査」依頼は誤認識に基づくため取り下げる。追加の重い再帰調査、Docker再インストール、WSL移設、強制キャッシュ削除は不要。C:空き35.38GiBを維持し、大容量化が実測されたときのみ対象限定の確認を行う。Codexは本来のGserver S2〜S7機能実装に集中し、本人専用CLI運用と既存データ保護を厳守。
 
 ## 2026-10-28 Master修正｜単独CLI運用・C/D配置/容量優先
 
 - 最新のMaster意思は **単独使用でVS Code/Cursor操作のみ**。管理者Web画面は必要なし。既存UIは除去のために工数を掛けないが、これ以上管理UI機能を盛らず、CLI/Composeで起動/停止/ログ/復旧を完結させる。必要なWeb/APIは維持。F01～F08の完成条件は[FINAL_ACCEPTANCE.md](requirements/FINAL_ACCEPTANCE.md)で修正。
 - **PCの確定既往:** C SSD約118GiB(前回空き約34～35GB、Master最新申告空き36GB)、D HDD内 `D:\WSL\Ubuntu`にWSL ext4.vhdx既存配置済み（当時約6.67GiB）。WSLとDockerを勝手に再配置しない。Docker Engine29.9.2はWSL内。docker/containerdの使用先、Linux mountと実Windowsディスク・image容量の2026-10-28時点readbackは **NOT_VERIFIED**。
 - D: HDD上のWSL ext4領域と`/mnt/d`/`/mnt/g`のcross-filesystem I/O性能差を現物で評価し、既存親Project Git/Worktree境界を崩さず必要最小の配置最適化を行う。Docker cache/build imageの不要増加を抑制。実データ削除・Docker prune・rootdir移設・WSL VHDX移設は別途検証/権限条件まで禁止。
-- **Exact Next (Codex):** 管理UI開発を止め、C/D空きと`/var/lib/docker`/`/var/lib/containerd`/WSL VHDXの保存先を読取計測 → 必要なS2 CLI・実機runtimeの受入 → G: Storage・正式Dev KB・TGS・隔離復元の未実装を削減。新規管理UI工数のために完成を遅らせない。Codexは時間指定自律ジョブ/別AIの起動禁止。
+- **Exact Next (Codex):** ディスク容量については直上のWindows/WSL実機監査済み（C:使用82.47GiB／空き35.38GiB、WSL VHDXはD:）。重複した容量調査をせず、S2 CLI・実機runtimeの受入 → G: Storage・正式Dev KB・TGS・隔離復元の未実装を減らす。管理UI拡張や新規重い依存は避ける。Codexは時間指定自律ジョブ/別AIの起動禁止。
 
 ## 2026-10-28 Codex継続｜S2差戻し修正・S3読取実装
 
