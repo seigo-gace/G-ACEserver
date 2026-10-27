@@ -43,6 +43,14 @@ class GserverStagingContract(unittest.TestCase):
         self.assertNotIn("--remove-orphans", self.script)
         self.assertNotIn('rm -rf', self.script)
 
+    def test_failed_startup_logs_before_cleanup(self):
+        self.assertIn("STARTUP_DIAGNOSTICS_BEGIN", self.script)
+        self.assertIn("STARTUP_DIAGNOSTICS_END", self.script)
+        self.assertIn("logs --no-color --no-log-prefix --tail 30", self.script)
+        self.assertLess(self.script.index("STARTUP_DIAGNOSTICS_BEGIN"),
+                        self.script.index("down --timeout 10"))
+        self.assertIn('exit "$result"', self.script)
+
     def test_minimal_image_privileges(self):
         for item in ('user: "65534:65534"', "cap_drop:", "no-new-privileges:true", "read_only: true", "mem_limit: 256m", "pids_limit: 64"):
             self.assertIn(item, self.compose)

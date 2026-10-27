@@ -9,6 +9,12 @@
   finish() {
     local result=$?
     trap - EXIT
+    if (( result != 0 && started == 1 )); then
+      echo 'STARTUP_DIAGNOSTICS_BEGIN'
+      sudo timeout 15 docker ps -a --filter "label=com.docker.compose.project=$project" --format 'CONTAINER_STATUS={{.Status}};EXIT={{.State}}' | head -n 5 || true
+      sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 15 docker compose -p "$project" -f "$compose_file" logs --no-color --no-log-prefix --tail 30 gserver-staging 2>&1 | sed -E -e 's/(Bearer |token[=: ]+|password[=: ]+)[^ ]+/\\1[REDACTED]/Ig' | head -n 32 || true
+      echo 'STARTUP_DIAGNOSTICS_END'
+    fi
     if (( started == 1 )); then
       if ! sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout 35 docker compose -p "$project" -f "$compose_file" down --timeout 10 >/dev/null; then
         echo 'ERROR=STAGING_TEARDOWN_FAILED'
