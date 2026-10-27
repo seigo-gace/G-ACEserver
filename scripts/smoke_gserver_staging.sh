@@ -61,6 +61,8 @@
   host_ports="$(sudo timeout 15 docker port "$id")"
   [[ -z "$host_ports" ]] || { echo 'ERROR=STAGING_HOST_PORT_EXPOSED'; exit 22; }
   sudo timeout 15 docker exec "$id" python3 -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=3); assert r.status==200; r.close()" || { echo 'ERROR=STAGING_HTTP_FAILED'; exit 23; }
+  phase=VERIFY_EPHEMERAL_LOG
+  sudo timeout 15 docker exec "$id" python3 -c "from pathlib import Path; p=Path('/logs/gserver.log'); assert p.is_file(), 'missing /logs/gserver.log'; assert p.stat().st_size>=0" || { echo 'ERROR=STAGING_LOG_NOT_WRITABLE'; exit 25; }
   phase=REGRESSION_CHECK
   [[ "$(systemctl is-active podman.socket || true)" == "$before_podman" && "$(systemctl is-active redis-server.service || true)" == "$before_redis" && "$(systemctl is-active site_total.service || true)" == "$before_site" ]] || { echo 'ERROR=EXISTING_SERVICE_CHANGED'; exit 24; }
   echo 'STAGING_HTTP=200;EXTERNAL_NETWORK=NONE;PUBLISHED_PORTS=NONE'

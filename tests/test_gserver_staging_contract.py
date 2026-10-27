@@ -55,6 +55,13 @@ class GserverStagingContract(unittest.TestCase):
         for item in ('user: "65534:65534"', "cap_drop:", "no-new-privileges:true", "read_only: true", "mem_limit: 256m", "pids_limit: 64"):
             self.assertIn(item, self.compose)
 
+    def test_log_directory_is_ephemeral_and_private(self):
+        self.assertIn('/logs:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700',
+                      self.compose)
+        self.assertIn('user: "65534:65534"', self.compose)
+        self.assertNotIn('target: /logs', self.compose)
+        self.assertNotIn('source: /mnt/g/Project/Gserver/logs', self.compose)
+
     def test_public_repo_secret_safety(self):
         for item in ("secret:", "password:", "token:", "Authorization:"):
             self.assertNotIn(item, self.compose)

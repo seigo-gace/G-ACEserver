@@ -21,6 +21,9 @@ services:
           create_host_path: false
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
+      # The existing Python app opens /logs/gserver.log on import.
+      # Isolated, nonpersistent and writable only by the container's nonroot UID.
+      - /logs:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64
