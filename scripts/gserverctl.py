@@ -2,12 +2,14 @@
 """Offline lifecycle for the dedicated Gserver Compose project; never deletes data."""
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "gserver"
@@ -15,11 +17,51 @@ IMAGE = re.compile(r"sha256:[a-f0-9]{64}\Z")
 
 
 class Controller:
-    def __init__(self, state=STATE):
+    def __init__(self, state=STATE, project="gace-gserver"):
+        if project != "gace-gserver" and not re.fullmatch(r"gace-gserver-test-[a-f0-9]{16}", project):
+            raise ValueError("invalid project")
+        self.project = project
         self.state = state
         self.record = state / "releases.json"
         self.pending = state / "pending.json"
-        self.docker = ["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]
+        self.docker = (["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]) + ["--host", "unix:///var/run/docker.sock"]
+
+    def bundle(self, image, create=False):
+        if not isinstance(image, str) or not IMAGE.fullmatch(image):
+            raise ValueError("immutable sha256 image ID required")
+        directory = self.state / "bundles"
+        manifest = directory / (image[7:] + ".json")
+        if create and not manifest.exists():
+            source = (ROOT / "deploy/compose.gserver.yaml").read_text()
+            source = source.replace("${GSERVER_IMAGE:?immutable_image_required}", image)
+            if "$" in source:
+                raise ValueError("unresolved deployment variables")
+            directory.mkdir(mode=0o700, exist_ok=True)
+            digest = hashlib.sha256(source.encode()).hexdigest()
+            target = directory / (digest + ".yaml")
+            if not target.exists():
+                temporary = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', dir=directory, delete=False) as stream:
+                        temporary = Path(stream.name)
+                        stream.write(source)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    temporary.replace(target)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ValueError("deployment snapshot changed")
+            self.write_atomic(manifest, {"sha256": digest})
+        data = json.loads(manifest.read_text())
+        digest = data.get("sha256") if isinstance(data, dict) else None
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("invalid deployment manifest")
+        target = directory / (digest + ".yaml")
+        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            raise ValueError("deployment snapshot changed")
+        return target
 
     def run(self, args, capture=False, env=None):
         return subprocess.run(self.docker + args, check=True, text=True,
@@ -29,7 +71,7 @@ class Controller:
         if not self.record.exists():
             return {}
         data = json.loads(self.record.read_text())
-        if any(k not in ("current", "previous") or not IMAGE.fullmatch(v)
+        if not isinstance(data, dict) or (data and 'current' not in data) or any(k not in ("current", "previous") or not isinstance(v, str) or not IMAGE.fullmatch(v)
                for k, v in data.items()):
             raise ValueError("invalid release record")
         return data
@@ -41,7 +83,7 @@ class Controller:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(target)
-        directory = os.open(self.state, os.O_RDONLY | os.O_DIRECTORY)
+        directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
         finally:
@@ -54,8 +96,10 @@ class Controller:
         if not self.pending.exists():
             raise ValueError("no interrupted operation")
         pending = json.loads(self.pending.read_text())
+        if not isinstance(pending, dict):
+            raise ValueError("invalid pending record")
         target = pending.get("target", "")
-        if not IMAGE.fullmatch(target):
+        if not isinstance(target, str) or not IMAGE.fullmatch(target):
             raise ValueError("invalid pending image")
         release = self.load()
         if release.get("current"):
@@ -65,11 +109,10 @@ class Controller:
         self.pending.unlink()
 
     def compose(self, image, args):
-        if not IMAGE.fullmatch(image):
-            raise ValueError("immutable sha256 image ID required")
-        env = dict(os.environ, GSERVER_IMAGE=image)
-        return self.run(["compose", "--project-name", "gace-gserver", "-f",
-                         str(ROOT / "deploy/compose.gserver.yaml"), *args], env=env)
+        snapshot = self.bundle(image)
+        # Image is literal in the snapshot: sudo environment filtering is irrelevant.
+        return self.run(["compose", "--project-name", self.project, "--env-file", "/dev/null",
+                         "--project-directory", str(self.state), "-f", str(snapshot), *args])
 
     def activate(self, image):
         if self.pending.exists():
@@ -78,12 +121,15 @@ class Controller:
             raise ValueError("immutable sha256 image ID required")
         old = self.load()
         self.run(["image", "inspect", image], capture=True)
+        self.bundle(image, create=True)
+        if old.get("current"):
+            self.bundle(old["current"])
         # First installation may not take over an existing project.
         if not old:
             existing = self.run(["ps", "-aq", "--filter",
-                                 "label=com.docker.compose.project=gace-gserver"], capture=True)
+                                 "label=com.docker.compose.project=" + self.project], capture=True)
             volumes = self.run(["volume", "ls", "-q", "--filter",
-                                "label=com.docker.compose.project=gace-gserver"], capture=True)
+                                "label=com.docker.compose.project=" + self.project], capture=True)
             if existing.stdout.strip() or volumes.stdout.strip():
                 raise ValueError("unowned Gserver project exists; inspect before adoption")
         self.write_atomic(self.pending, {"target": image})

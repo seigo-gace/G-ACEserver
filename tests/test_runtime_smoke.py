@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -32,10 +33,12 @@ class RuntimeSmokeTests(unittest.TestCase):
     def run_scenario(self, scenario):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'sudo').write_text(FAKE_SUDO)
+            (root / 'sudo').write_text(FAKE_SUDO.replace('#!/usr/bin/env python3', '#!' + sys.executable))
             (root / 'sudo').chmod(0o755)
             (root / 'systemctl').write_text('#!/bin/sh\nprintf "active\\n"\n')
             (root / 'systemctl').chmod(0o755)
+            (root / 'python3').write_text('#!/bin/sh\n[ "$SCENARIO" != controller_failure ]\n')
+            (root / 'python3').chmod(0o755)
             env = dict(os.environ, PATH=directory + os.pathsep + os.environ['PATH'],
                        FAKE_ROOT=directory, SCENARIO=scenario)
             result = subprocess.run(['bash', str(ROOT / 'scripts/smoke_gserver_runtime.sh')],
@@ -58,6 +61,12 @@ class RuntimeSmokeTests(unittest.TestCase):
         result, calls = self.run_scenario('cleanup_failure')
         self.assertEqual(result.returncode, 33)
         self.assertNotIn('VERIFY=PASS', result.stdout)
+
+    def test_controller_failure_propagates_and_cleans_outer_fixture(self):
+        result, calls = self.run_scenario('controller_failure')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('PHASE=CONTROLLER_UPDATE_ROLLBACK', result.stdout)
+        self.assertIn('down --volumes', calls)
 
     def test_success_recreates_and_removes_only_isolated_volume(self):
         result, calls = self.run_scenario('success')

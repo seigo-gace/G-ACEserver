@@ -7,10 +7,13 @@ import shutil
 import signal
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from urllib.parse import parse_qs, quote, urlsplit
+from storage import Storage, StorageUnavailable, InvalidPath, byte_range
 
 HOST = os.environ.get("GSERVER_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GSERVER_PORT", "8765"))
@@ -18,6 +21,8 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = Path(os.environ.get("GSERVER_LOG_DIR", str(APP_ROOT / "logs"))) / "gserver.log"
 G_MOUNT = os.environ.get("GSERVER_STORAGE_ROOT", "/mnt/g")
 TOKEN_FILE = os.environ.get("GSERVER_AUTH_FILE", "")
+FILES_ROOT = os.environ.get("GSERVER_FILES_ROOT", "")
+FILES = Storage(G_MOUNT, FILES_ROOT) if FILES_ROOT else None
 
 logger = logging.getLogger("gserver")
 logger.setLevel(logging.INFO)
@@ -69,6 +74,16 @@ class Handler(BaseHTTPRequestHandler):
         # Never persist URL query, request headers, credentials or user paths.
         logger.info("http_request_completed")
 
+    def log_request(self, code='-', size='-'):
+        logger.info(json.dumps({'event_id': getattr(self, 'request_id', None),
+                               'service': 'gserver', 'action': getattr(self, 'action', 'unknown'),
+                               'http_status': code}, separators=(',', ':')))
+
+    def end_headers(self):
+        if hasattr(self, 'request_id'):
+            self.send_header('X-Request-ID', self.request_id)
+        super().end_headers()
+
     def _json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
@@ -80,8 +95,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        self.request_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         path = self.path.split("?", 1)[0]
+        self.action = path[1:] if path in ('/health', '/status', '/ready', '/storage', '/mounts', '/files', '/download') else 'other'
 
         if path == "/health":
             self._json({"status": "ok", "service": "gserver"})
@@ -107,11 +124,15 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if path not in ("/status", "/ready", "/storage", "/mounts"):
+        if path not in ("/status", "/ready", "/storage", "/mounts", "/files", "/download"):
             self._json({"error": "not_found"}, status=404)
             return
         if not authorized(self.headers.get("Authorization")):
             self._json({"error": "unauthorized"}, status=401)
+            return
+
+        if path in ("/files", "/download"):
+            self._files(path)
             return
 
         if path == "/ready":
@@ -147,6 +168,60 @@ class Handler(BaseHTTPRequestHandler):
             }
             self._json(payload)
             return
+
+    def _files(self, route):
+        started = False
+        try:
+            if FILES is None:
+                raise StorageUnavailable()
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=4)
+            allowed = {'path', 'after', 'limit'} if route == '/files' else {'path'}
+            if set(query) - allowed or any(len(v) != 1 for v in query.values()):
+                raise InvalidPath()
+            path = query.get('path', [''])[0]
+            if route == '/files':
+                self._json(FILES.listing(path, query.get('after', [''])[0], int(query.get('limit', ['100'])[0])))
+                return
+            with FILES.open_file(path) as (fd, size, etag):
+                requested = self.headers.get('Range')
+                if self.headers.get('If-Range') not in (None, etag):
+                    requested = None
+                try:
+                    begin, end = byte_range(requested, size)
+                except ValueError:
+                    self.send_response(416)
+                    self.send_header('Content-Range', f'bytes */{size}')
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
+                self.send_response(206 if requested else 200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Length', str(end - begin))
+                self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + quote(path.split('/')[-1], safe=''))
+                self.send_header('ETag', etag)
+                self.send_header('Accept-Ranges', 'bytes')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                if requested:
+                    self.send_header('Content-Range', f'bytes {begin}-{end - 1}/{size}')
+                self.end_headers()
+                started = True
+                os.lseek(fd, begin, os.SEEK_SET)
+                remaining = end - begin
+                while remaining:
+                    chunk = os.read(fd, min(65536, remaining))
+                    if not chunk:
+                        raise StorageUnavailable()
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (InvalidPath, ValueError):
+            if not started:
+                self._json({'error': 'invalid_storage_request'}, 400)
+        except (StorageUnavailable, OSError):
+            if started:
+                self.close_connection = True
+            else:
+                self._json({'error': 'storage_unavailable'}, 503)
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True

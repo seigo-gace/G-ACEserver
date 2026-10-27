@@ -1,4 +1,15 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Codex継続｜S2差戻し修正・S3読取実装
+
+- Owner=Codex。再開HEAD `28281a6b516f7059df65ce1ce8ae933076a1d34a`、検証プロセスなしを確認して変更再開。旧HEADの結果が後から届いた場合は、そのHEADの証拠として扱い、新しい実装のPASSへ転用しない。
+- **S2 Source:** sudoでimage環境変数が失われる経路を修正。image別のCompose snapshotをローカルへ原子的保存/hash検査し、後日のソース変更から起動/差戻しを分離。Docker接続はPCのUnix socketへ固定。実controllerの更新/差戻し/volume保持を検証する隔離smokeを一括試験へ追加。
+- **S3 Source:** 明示許可されたmount配下の一覧/ページ分割/ストリームdownload/Range、traversal・symlink・hardlink・特殊ファイル・Windows alias拒否を実装。UIのフォルダー移動/保存/再試行/ログアウト取消、応答と安全な監査ログのrequest IDを追加。`GSERVER_FILES_ROOT`未設定では無効、実G:/F:への接続・変更なし。[S3契約](architecture/STORAGE_S3.md)。アップロード/更新/削除は未実装。
+- **検証:** Python 60件、既存Windows Nodeを利用したUI挙動4件、snapshot Compose config、bash構文を検証。Dockerをmockした試験・mountを模擬した合成ファイル試験を含み、実機コンテナ/実USB/browser E2Eではない。正確な終了結果は本変更のIssue #9記録に記載。
+- **証拠継続:** `verify_pc_runtime.sh`がローカルstateの`gserver/verification/latest.json`へHEAD/phase/exit/timestampだけを保存する。生ログ/秘密なし、ソース変更時PASS禁止。同じ検証を再依頼する前にreceiptを読む。
+- **PC Runtime:** 元ソースSHA不変。sudo認証は引き続き本人端末が必要で、更新版Docker起動/永続性/実rollback未確認。実行結果未受領をPASSとしない。新しい検証の重複要求はしていない。
+- **CI/TGS/Backup-Restore:** 未実行/未実証。S4既存KB・S5接続権限/暗号backup・S6監視・S7再起動/復元を完了扱いしない。F01–F08と46タスクを維持。
+- **Exact Next:** 最新HEADの一括検証receipt/結果を照合→失敗箇所だけ修正・必要範囲再検証→S2正式配置/ingress/Windows持続稼働。安全に独立可能なS3以降の実装は継続。原本/秘密/公開設定/Contabo/既存サービスには変更なし。
+
 ## 2026-10-27 Codex実測・S2ソース実装（現セッション）
 
 - **Owner / Tasks:** Codex、GSR-S1-04/S2-01/S2-02/S2-05の実装差分。開始時main `8e2dcaa19da67f04feb5f9ea2608d62d8bcbe497`。F01–F08 / 46タスクは未完了のまま。旧記録は履歴として保持する。

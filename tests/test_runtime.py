@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -12,6 +13,7 @@ import urllib.request
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'app'))
 TMP = tempfile.TemporaryDirectory()
 os.environ["GSERVER_LOG_DIR"] = TMP.name
 spec = importlib.util.spec_from_file_location("gserver", ROOT / "app/gserver.py")
@@ -39,8 +41,9 @@ class RuntimeTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
-    def request(self, path, auth=None):
+    def request(self, path, auth=None, extra_headers=None):
         headers = {"Authorization": auth} if auth else {}
+        headers.update(extra_headers or {})
         try:
             response = urllib.request.urlopen(urllib.request.Request(self.url + path, headers=headers), timeout=3)
         except urllib.error.HTTPError as error:
@@ -78,9 +81,40 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(handler.maxBytes, 1048576)
         self.assertEqual(handler.backupCount, 4)
 
+    def test_response_request_id_matches_safe_audit_event(self):
+        with urllib.request.urlopen(self.url + '/health?private=not-for-log', timeout=3) as response:
+            event_id = response.headers['X-Request-ID']
+            self.assertEqual(len(event_id), 32)
+            response.read()
+        log = app.LOG_PATH.read_text()
+        self.assertIn('"event_id":"' + event_id + '"', log)
+        self.assertNotIn('not-for-log', log)
+
     def test_ui_and_navigation_available(self):
         self.assertEqual(self.request('/')[0], 200)
         self.assertEqual(self.request('/ui.js')[0], 200)
+
+    def test_file_api_requires_authentication_and_explicit_root(self):
+        self.assertEqual(self.request('/files')[0], 401)
+        self.assertEqual(self.request('/download?path=sample')[0], 401)
+        with patch.object(app, 'TOKEN_FILE', str(self.credential)), patch.object(app, 'FILES', None):
+            self.assertEqual(self.request('/files', 'Bearer ' + 'x' * 32)[0], 503)
+
+    def test_file_api_listing_download_range_and_traversal(self):
+        root = Path(TMP.name) / 'files'
+        root.mkdir(exist_ok=True)
+        content = b'0123456789' * 10000
+        (root / 'sample').write_bytes(content)
+        with patch.object(app, 'TOKEN_FILE', str(self.credential)), patch.object(app, 'FILES', app.Storage(TMP.name, str(root))), patch('storage.os.path.ismount', return_value=True):
+            auth = 'Bearer ' + 'x' * 32
+            code, body = self.request('/files', auth)
+            self.assertEqual(code, 200)
+            self.assertEqual(json.loads(body)['entries'][0]['name'], 'sample')
+            self.assertEqual(self.request('/download?path=sample', auth), (200, content))
+            self.assertEqual(self.request('/download?path=sample', auth, {'Range': 'bytes=3-5'}), (206, b'345'))
+            self.assertEqual(self.request('/download?path=sample', auth, {'Range': 'bytes=100000-'} )[0], 416)
+            self.assertEqual(self.request('/download?path=../credential', auth)[0], 400)
+            self.assertEqual(self.request('/files?path=a&path=b', auth)[0], 400)
 
 
 class LifecycleTests(unittest.TestCase):
@@ -90,6 +124,8 @@ class LifecycleTests(unittest.TestCase):
         self.controller = ctl.Controller(Path(self.temp.name))
         self.old = 'sha256:' + 'a' * 64
         self.new = 'sha256:' + 'b' * 64
+        self.controller.bundle(self.old, create=True)
+        self.controller.bundle(self.new, create=True)
 
     def test_update_and_rollback_persist_immutable_versions(self):
         self.controller.save({'current': self.old})
@@ -150,6 +186,36 @@ class LifecycleTests(unittest.TestCase):
                 self.controller.activate(self.new)
         self.assertTrue(self.controller.pending.exists())
         self.assertEqual(self.controller.load(), {'current': self.old})
+
+    def test_saved_deployment_survives_source_change(self):
+        snapshot = self.controller.bundle(self.old)
+        original = snapshot.read_bytes()
+        with patch.object(ctl, 'ROOT', Path('/does-not-exist')):
+            self.controller.save({'current': self.old})
+            with patch.object(self.controller, 'run') as run:
+                self.controller.action('start')
+                self.assertIn(str(snapshot), run.call_args.args[0])
+            self.assertEqual(self.controller.bundle(self.old, create=True).read_bytes(), original)
+
+    def test_snapshot_does_not_depend_on_sudo_environment(self):
+        source = self.controller.bundle(self.old).read_text()
+        self.assertIn(self.old, source)
+        self.assertNotIn('${', source)
+        self.assertIn('unix:///var/run/docker.sock', self.controller.docker)
+
+    def test_changed_snapshot_refused_before_docker(self):
+        self.controller.bundle(self.old).write_text('tampered')
+        self.controller.save({'current': self.old})
+        with patch.object(self.controller, 'run') as run:
+            with self.assertRaises(ValueError):
+                self.controller.action('start')
+            run.assert_not_called()
+
+    def test_malformed_release_record_fails_closed(self):
+        for data in ([], {'current': None}, {'previous': 42}):
+            self.controller.save(data)
+            with self.assertRaises(ValueError):
+                self.controller.load()
 
 
 if __name__ == '__main__':

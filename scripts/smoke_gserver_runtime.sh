@@ -63,6 +63,8 @@
   phase=STOP_START
   compose stop --timeout 10
   compose up -d --wait --wait-timeout 60
+  phase=CONTROLLER_UPDATE_ROLLBACK
+  python3 scripts/smoke_gserver_controller.py "$GSERVER_IMAGE"
   phase=EXISTING_SERVICES
   [[ "$before" == "$(systemctl is-active podman.socket redis-server site_total btpanel || true)" ]]
 )
