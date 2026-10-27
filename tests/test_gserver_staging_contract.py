@@ -28,6 +28,11 @@ class GserverStagingContract(unittest.TestCase):
         self.assertNotIn("docker.sock", self.compose)
         self.assertIn('HOST_PORTS=NONE', self.script)
 
+    def test_compose_env_passed_via_sudo(self):
+        self.assertNotIn("sudo timeout", self.script)
+        self.assertIn('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout', self.script)
+        self.assertEqual(self.script.count('sudo env GSERVER_SOURCE_FILE="$GSERVER_SOURCE_FILE" timeout'), 5)
+
     def test_contained_lifecycle(self):
         self.assertIn("STAGING_PROJECT_ALREADY_EXISTS", self.script)
         self.assertIn('down --timeout 10', self.script)
