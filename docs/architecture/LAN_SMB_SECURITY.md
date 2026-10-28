@@ -31,3 +31,9 @@ Microsoft「Windows 10 サポート終了」 https://support.microsoft.com/ja-jp
 Master実測: `scripts/windows_lan_security_readonly.ps1` 実行 `VERIFY=PASS` は監査処理が正常終了した意味であり、安全な共有の合格ではない。観測値: `SMB1_OPTIONAL_FEATURE_STATE=NOT_VERIFIED`、`SMB_SIGNING_REQUIRED_REGISTRY=0`（このPCでは署名の必須を示さない）、`SMB_SIGNING_EFFECTIVE=NOT_VERIFIED`、`SMB_SHARE_ENCRYPTION_EFFECTIVE=NOT_VERIFIED`、`BROAD_WRITE_ACE_COUNT=2`、`ACL_UNRESOLVED_IDENTITY_COUNT=0`、`FIREWALL_445_REMOTE_SCOPE=NOT_VERIFIED`、`ROUTER_WAN_445_FORWARD=NOT_VERIFIED`、`WIFE_PC_SECURITY_PATCH_STATUS=NOT_VERIFIED`、`CHANGES=NONE`。
 
 Broad Write 2件はEveryone/Authenticated Users/Builtin Usersの許可を簡易カウントした値だが、shareとNTFSの実効アクセスや外部公開を証明するものではない。親フォルダーからの継承/ACLの種類を匿名・最小出力で判定する `scripts/windows_lan_acl_detail_readonly.ps1` を追加。本人のWindows user名とファイル名は出力しない。**既存ACLはまだ編集しない。**
+
+## 2026-10-28 NTFS inherited ACE readback and narrow intake design
+
+PC実測で `G:\\GserverStorage` および `G:\\GserverStorage\\files` は **NTFS**、ACL継承無効化はしていない。双方で `Authenticated Users` のALLOW Write相当 ACEが **2件・すべて継承**。これは4個の個別の無防備な共有を意味せず、SMB経由の実効アクセスもこの出力だけでは決まらない。親G:のACLを変更しない。親に広範Modifyが残るため、子だけ継承を遮断しても親からのDeleteChild等の実効権限まで遮断できたとは断定しない。
+
+新設するネットワーク受信用の候補は **`G:\\GserverStorage\\files\\LAN-Inbox` のみ**（既存の `README.md` が置かれた `files` 全体は共有しない）。`scripts/windows_lan_inbox.ps1` は明示 `-Prepare` で未存在の空子ディレクトリを作るだけで、その子の継承保護・SYSTEM/Admins/Owner限定ACLをreadback。SMB share、User、Windows Firewall、Router、Dockerは未変更。既存フォルダーの保護状態を勝手に改修せず拒否する。親側を安全化せずに「完全に独立したセキュアボリューム」と呼ばない。LANの実効アクセスは専用share ACLとNTFS ACLの積、およびFirewallのwife PC限定で追加検証。ロールバック時にユーザーのファイルを自動削除しない。
