@@ -311,9 +311,9 @@ class Controller:
         print(result.stdout.rstrip())
 
     def bot_gateway_preflight(self, payload):
-        """Verify the container-to-private-Gateway TLS/auth path before storing
+        """Check container HTTPS/auth and schema rejection before storing
         any credentials that would automatically release pending Bot events.
-        The deliberately invalid request must be rejected BEFORE persistence.
+        The URL's private-network authorization is a separate operator gate.\n        The deliberately invalid request must be rejected BEFORE persistence.
         """
         probe = (
             "import json,sys,urllib.error,urllib.request\n"
@@ -333,14 +333,14 @@ class Controller:
             " if not isinstance(answer,dict) or answer.get('error')!='invalid internal event':"
             " raise RuntimeError('GATEWAY_PREFLIGHT_WRONG_ENDPOINT')\n"
             "else: raise RuntimeError('GATEWAY_PREFLIGHT_ACCEPTED_INVALID_EVENT')\n"
-            "print('GATEWAY_PRIVATE_PREFLIGHT=PASS')\n"
+            "print('GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS')\n"
         )
         result = subprocess.run(
             self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", probe],
             input=payload, capture_output=True, text=True, timeout=15, check=True)
-        if result.stdout.strip() != "GATEWAY_PRIVATE_PREFLIGHT=PASS":
+        if result.stdout.strip() != "GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS":
             raise ValueError("gateway preflight result not verified")
-        print("GATEWAY_PRIVATE_PREFLIGHT=PASS")
+        print("GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS")
 
     def bot_gateway_config(self):
         # Never pass the private internal API token in CLI args, source or stdout.
