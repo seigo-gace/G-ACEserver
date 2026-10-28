@@ -229,3 +229,58 @@ def verify_existing_projection(root, authority, *, timeout_seconds=180):
         raise KBSourceError("KB_CURRENT_CHANGED_AFTER_PROJECTION")
     return {"projection": "EXISTING_KB_VERIFIER_PASS", "search_mcp_verified": False,
             "changes": "NONE"}
+
+
+def verify_existing_counts(root, authority):
+    """Independently count the actual Current JSONL rows, with bounded reads.
+
+    This never reindexes or changes the KB. Marker-declared counts alone
+    are not proof that the same numbers of KB records exist on the drive.
+    """
+    if authority.get("current") != "ACTIVE_AUTHORITY_HASHED":
+        raise KBSourceError("KB_COUNTS_REQUIRE_HASHED_ACTIVE")
+    root = Path(root)
+    declared = authority["counts"]
+    source_checks = (
+        ("formal_records", AUTH_HASHES["formalKbSha256"], "totalFormalRecordCount"),
+        ("reusable_records", AUTH_HASHES["knowledgeRecordsSha256"], "knowledgeUnitCount"),
+        ("metadata", AUTH_HASHES["knowledgeMetadataSha256"], "knowledgeUnitCount"),
+        ("relationships", AUTH_HASHES["relationshipsSha256"], "relationshipCount"),
+        ("cases", AUTH_HASHES["casesSha256"], "caseCount"),
+    )
+    counts = {}
+    for label, parts, field in source_checks:
+        fd, size = _open_regular(root, parts)
+        try:
+            if size > MAX_HASH_FILE:
+                raise KBSourceError("KB_COUNT_FILE_TOO_LARGE")
+            pending = b""
+            total = 0
+            read = 0
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                read += len(chunk)
+                if read > MAX_HASH_FILE:
+                    raise KBSourceError("KB_COUNT_FILE_TOO_LARGE")
+                pending += chunk
+                lines = pending.split(b"\n")
+                pending = lines.pop()
+                total += sum(bool(line.strip()) for line in lines)
+                if len(pending) > 8 * 1024 * 1024:
+                    raise KBSourceError("KB_JSONL_RECORD_TOO_LARGE")
+            if pending.strip():
+                total += 1
+            if read != size:
+                raise KBSourceError("KB_COUNT_FILE_CHANGED")
+            if total != declared[field]:
+                raise KBSourceError("KB_CURRENT_COUNT_MISMATCH_" + label.upper())
+            counts[label] = total
+        finally:
+            os.close(fd)
+    # A count is only valid for the Current we initially inspected.
+    refreshed = inspect(root, verify_hashes=True, enforce_mount=False)
+    if refreshed.get("catalog_commit") != authority.get("catalog_commit") or refreshed.get("counts") != declared:
+        raise KBSourceError("KB_CURRENT_CHANGED_DURING_COUNT")
+    return {"counts": counts, "verified": True, "changes": "NONE"}
