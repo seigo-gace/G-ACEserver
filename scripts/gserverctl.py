@@ -44,8 +44,8 @@ class Controller:
                     raise ValueError("unexpected base network contract")
                 source = source.replace(marker,
                     '    ports:\n      - "127.0.0.1:18765:8765"\n'
-                    '    networks:\n      - gserver-local\n', 1)
-                source += "\nnetworks:\n  gserver-local:\n    driver: bridge\n"
+                    '    networks:\n      - gserver-local-v2\n', 1)
+                source += "\nnetworks:\n  gserver-local-v2:\n    driver: bridge\n"
             if "$" in source:
                 raise ValueError("unresolved deployment variables")
             directory.mkdir(mode=0o700, exist_ok=True)
