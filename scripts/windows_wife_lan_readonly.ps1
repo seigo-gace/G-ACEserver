@@ -35,9 +35,12 @@ try {
     if ($repoMarker -and $inboxMarker) {
         Write-Output 'MASTER_GSERVER_MARKERS=BOTH_PRESENT'
         Write-Output 'HOST_ROLE_HINT=LIKELY_MASTER_GSERVER'
+        Write-Output 'WIFE_PC_PROBE=REJECTED_MASTER_HOST'
+        throw 'This is the Gserver host, not an independently checked wife PC'
     } else {
         Write-Output 'MASTER_GSERVER_MARKERS=NOT_BOTH_PRESENT'
         Write-Output 'HOST_ROLE_HINT=UNIDENTIFIED'
+        Write-Output 'WIFE_PC_PROBE=NOT_IDENTIFIED_AS_MASTER'
     }
     Write-Output 'HOST_IDENTITY=NOT_CRYPTOGRAPHICALLY_VERIFIED'
 

@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 妻PC検査の誤実行が判明｜Master Hostの実機検証として隔離・スクリプトをfail closed
+
+- **Master報告の実測**: 2026-10-28 15:14頃、`windows_wife_lan_readonly.ps1` 新版をPowerShellで実行。Windows `POWERSHELL_PARSE=PASS`、`OS_FAMILY_BY_BUILD=WINDOWS_11_FAMILY`、25H2 / build26200.8894、`MASTER_GSERVER_MARKERS=BOTH_PRESENT`、`HOST_ROLE_HINT=LIKELY_MASTER_GSERVER`、仮想NIC候補2件を除くLAN IPv4候補1件、Private1/Public0、`VERIFY=PASS`。`MASTER_GSERVER_MARKERS=BOTH_PRESENT` により**検査元はGserver Master Hostの可能性が極めて高い**ため、妻Windows10の現況証拠として使用禁止。Masterの個別IPは公開Repoに記載しない。
+- **ソース不具合を修正**: 妻PC用の検査をGserver Master自身で実行した際に従来 `VERIFY=PASS` を返し、妻PC確認済みと混同する恐れがあった。Master固有2 marker同時存在なら明示 `WIFE_PC_PROBE=REJECTED_MASTER_HOST` でfail closed/exit1 とする。妻PCで両markerのない場合は `WIFE_PC_PROBE=NOT_IDENTIFIED_AS_MASTER`、ただし**それだけで妻本人のPCと暗号的に認証された証拠にはならない**。`tests/test_windows_lan_probes_contract.py` に回帰assert追加。新スクリプトはSource実装のみで妻PC実行・PowerShell Parserは未検証。
+- **次の実作業**: 妻PC本体の画面上PowerShellで固定GitHub版の検査を実行。失敗時は `WIFE_PC_PROBE` を読み、別端末ログを確認。妻端末がWindows10ならESU/OSパッチ状態をWindows設定UI/別証拠で確認し、未保護なら家庭内書込共有は延期。ネットワーク開放・SMBアカウント作成は引き続き未実行。Master Windows11 `G:\\GserverStorage\\files\\LAN-Inbox` ACL、localhost18765、G:/F:既存原本は維持。
+
 ## 2026-10-28 「妻Windows10」用probeの実行ログはWin11 25H2｜Host同一性は未確認
 
 - **提供された実ログ:** PowerShellがGitHub固定commit `4b0f3a57790bd4a63fb4c4dfff92fcff7662b847` の `windows_wife_lan_readonly.ps1` を取得し `POWERSHELL_PARSE=PASS`、本体 `VERIFY=PASS`、`CHANGES=NONE`。`WINDOWS_PRODUCT=Windows 10 Pro` と `WINDOWS_RELEASE=25H2`、`WINDOWS_BUILD=26200.8894` は**矛盾**する。Microsoft公式Windows11リリース表で **OS build 26200 = Windows 11 25H2** と確定。レジストリProductName文字列はこの端末で実OS世代を正しく表していない。従って **このログは「Windows10端末がESUで安全」とは証明しない**。`ESU_ENROLLMENT/PATCH_ELIGIBILITY=NOT_VERIFIED` はそのまま。実行した端末自体を証明するIDなし。実行シェルの端末表示とWSLのような仮想NIC候補だけでMaster PC確定とも断定しない。
