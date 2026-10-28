@@ -1,5 +1,7 @@
 """Gserver Bot -> durable spool -> existing Gateway TGserver ZERO lane."""
 import json
+import threading
+import time
 from pathlib import Path
 import sys
 import tempfile
@@ -119,6 +121,41 @@ class TgsBridgeTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(BotEventError):
                 gateway_endpoint(url)
         self.assertEqual(gateway_endpoint("https://gateway.example"), "https://gateway.example/internal/events")
+
+    def test_gateway_config_lock_blocks_parallel_reader_until_writer_finishes(self):
+        from tgs_bridge import gateway_configuration_lock
+        folder = self.folder / "config"
+        folder.mkdir(mode=0o700)
+        reader_started = threading.Event()
+        reader_finished = threading.Event()
+        def reader():
+            reader_started.set()
+            with gateway_configuration_lock(folder, shared=True):
+                reader_finished.set()
+        with gateway_configuration_lock(folder, shared=False):
+            task = threading.Thread(target=reader)
+            task.start()
+            self.assertTrue(reader_started.wait(1))
+            self.assertFalse(reader_finished.wait(0.05))
+        self.assertTrue(reader_finished.wait(1))
+        task.join(timeout=1)
+        self.assertFalse(task.is_alive())
+
+    def test_gateway_config_lock_refuses_symlink_and_world_readable_lock(self):
+        from tgs_bridge import gateway_configuration_lock
+        folder = self.folder / "config"
+        folder.mkdir(mode=0o700)
+        lock = folder / "gateway-config.lock"
+        lock.symlink_to(self.folder / "target")
+        with self.assertRaises((BotEventError, OSError)):
+            with gateway_configuration_lock(folder):
+                pass
+        lock.unlink()
+        lock.write_text("already here")
+        lock.chmod(0o644)
+        with self.assertRaises(BotEventError):
+            with gateway_configuration_lock(folder):
+                pass
 
     def test_access_headers_are_optional_and_require_private_complete_pair(self):
         from tgs_bridge import gateway_access_headers
