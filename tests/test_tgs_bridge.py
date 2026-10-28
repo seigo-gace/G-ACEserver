@@ -120,6 +120,55 @@ class TgsBridgeTests(unittest.TestCase):
                 gateway_endpoint(url)
         self.assertEqual(gateway_endpoint("https://gateway.example"), "https://gateway.example/internal/events")
 
+    def test_access_headers_are_optional_and_require_private_complete_pair(self):
+        from tgs_bridge import gateway_access_headers
+        id_file = self.folder / "cf-id"
+        secret_file = self.folder / "cf-secret"
+        self.assertEqual(gateway_access_headers(id_file, secret_file), {})
+        id_file.write_text("testclientid1234")
+        id_file.chmod(0o600)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+        secret_file.write_text("testsecretvalue1234")
+        secret_file.chmod(0o600)
+        self.assertEqual(gateway_access_headers(id_file, secret_file), {
+            "CF-Access-Client-Id": "testclientid1234",
+            "CF-Access-Client-Secret": "testsecretvalue1234",
+        })
+        secret_file.chmod(0o644)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+        secret_file.chmod(0o600)
+        id_file.unlink()
+        id_file.symlink_to(secret_file)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+
+    def test_access_credentials_are_separate_from_gateway_bearer(self):
+        from tgs_bridge import gateway_access_headers
+        cf_id = self.folder / "cf-id"
+        cf_secret = self.folder / "cf-secret"
+        cf_id.write_text("testclientid1234")
+        cf_secret.write_text("testsecretvalue1234")
+        cf_id.chmod(0o600)
+        cf_secret.chmod(0o600)
+        class Response:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-uuid"}'
+        class Client:
+            def open(self, request, **_kwargs):
+                self.headers = dict(request.header_items())
+                return Response()
+        client = Client()
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        with patch("tgs_bridge.gateway_access_headers", return_value=gateway_access_headers(cf_id, cf_secret)):
+            self.assertEqual(send_gateway(body, "https://gateway.example", "gateway-bearer", opener=client), "ack")
+        self.assertEqual(client.headers["Authorization"], "Bearer gateway-bearer")
+        self.assertEqual(client.headers["Cf-access-client-id"], "testclientid1234")
+        self.assertEqual(client.headers["Cf-access-client-secret"], "testsecretvalue1234")
+
     def test_gateway_redirects_never_forward_internal_bearer(self):
         # urllib's default POST 301/302/303 handler can copy Authorization
         # to a different origin. Our handler must refuse every redirect.
