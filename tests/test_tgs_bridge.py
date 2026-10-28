@@ -105,12 +105,29 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(first[1], second[1])
         self.assertEqual(second[2], 2)
 
+    def test_gateway_generated_receipt_id_is_accepted(self):
+        class FakeResponse:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-uuid-123"}'
+        class Client:
+            def open(self, *_args, **_kwargs): return FakeResponse()
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        self.assertEqual(send_gateway(body, "https://gateway.example", "testtoken", opener=Client()), "ack")
+
+    def test_unhashable_field_is_rejected_as_validation_error(self):
+        with self.assertRaises(BotEventError):
+            self.queue.accept(dict(sample(), event=["invalid"]))
+        with self.assertRaises(BotEventError):
+            self.queue.accept(dict(sample(), level=["error"]))
+
     def test_bad_202_receipt_keeps_event(self):
         class FakeResponse:
             status = 202
             def __enter__(self): return self
             def __exit__(self, *_): return False
-            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"WRONG"}'
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":""}'
         class Client:
             def open(self, *_args, **_kwargs): return FakeResponse()
         body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
