@@ -12,10 +12,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from storage import Storage, InvalidPath, StorageUnavailable, components
+from storage_mutations import digest, quota, to_trash, restore as restore_trashed, trash_list, trash_info, replace_version
 
 DRIVE = Path("/mnt/g")
 FILES = DRIVE / "GserverStorage" / "files"
 CHUNK = 1024 * 1024
+DEFAULT_RESERVE_BYTES = 64 * 1024 * 1024
 
 
 def checked_name(name):
@@ -89,24 +91,36 @@ def save_new(source_fd, parent_fd, name):
             _sync_directory(parent_fd)
 
 
-def storage(mount=DRIVE, root=FILES):
+def storage(mount=None, root=None):
+    mount = DRIVE if mount is None else mount
+    root = FILES if root is None else root
     if not os.path.ismount(mount):
         raise StorageUnavailable()
     return Storage(str(mount), str(root))
 
 
-def put(source, mount=DRIVE, root=FILES):
+def _check_budget(store, source_bytes, max_bytes, reserve_bytes):
+    if max_bytes is not None and (max_bytes < 0 or source_bytes > max_bytes):
+        raise ValueError("source exceeds --max-bytes")
+    if reserve_bytes < 0:
+        raise ValueError("negative --reserve-bytes")
+    available = quota(store)["available_bytes"]
+    if available < source_bytes + reserve_bytes:
+        raise OSError(errno.ENOSPC, "not enough G: space with reserved headroom")
+
+
+def put(source, mount=None, root=None, *, max_bytes=None, reserve_bytes=DEFAULT_RESERVE_BYTES):
     store = storage(mount, root)
-    # Files are opened without following links; caller only gets the dedicated subtree.
     fd = open_regular(source)
     try:
+        _check_budget(store, os.fstat(fd).st_size, max_bytes, reserve_bytes)
         with store.directory() as folder:
             return save_new(fd, folder, checked_name(Path(source).name))
     finally:
         os.close(fd)
 
 
-def get(name, dest_dir, mount=DRIVE, root=FILES):
+def get(name, dest_dir, mount=None, root=None):
     store = storage(mount, root)
     name = checked_name(name)
     target = Path(dest_dir).expanduser()
@@ -121,26 +135,70 @@ def get(name, dest_dir, mount=DRIVE, root=FILES):
             os.close(directory)
 
 
-def list_files(mount=DRIVE, root=FILES):
+def list_files(mount=None, root=None):
     return storage(mount, root).listing(limit=200)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Gserver owner-only G: file CLI; never exposes a new HTTP write API")
     group = parser.add_subparsers(dest="action", required=True)
     p = group.add_parser("put", help="Copy a local file to G:; refuse overwrites")
     p.add_argument("source")
+    p.add_argument("--max-bytes", type=int, default=None)
+    p.add_argument("--reserve-bytes", type=int, default=DEFAULT_RESERVE_BYTES)
     g = group.add_parser("get", help="Copy one stored file into a local directory")
     g.add_argument("name")
     g.add_argument("into_directory")
     group.add_parser("list", help="Show up to 200 stored files")
+    group.add_parser("quota", help="Show available bytes on mounted G: without writes")
+    h = group.add_parser("hash", help="Calculate sha256 before a guarded mutation")
+    h.add_argument("name")
+    z = group.add_parser("trash", help="Recoverably hide a file; require current sha256")
+    z.add_argument("name")
+    z.add_argument("--expect-sha256", required=True)
+    group.add_parser("trash-list", help="List up to 100 opaque recovery ids, without reading large video files")
+    info = group.add_parser("trash-info", help="Calculate sha256 for one recovery id")
+    info.add_argument("restore_id")
+    r = group.add_parser("restore", help="Restore an old version without overwriting existing files")
+    r.add_argument("restore_id")
+    r.add_argument("name")
+    r.add_argument("--expect-sha256", required=True)
+    v = group.add_parser("replace", help="Atomically replace file and preserve the old version")
+    v.add_argument("source")
+    v.add_argument("name")
+    v.add_argument("--expect-sha256", required=True)
+    v.add_argument("--max-bytes", type=int, default=None)
+    v.add_argument("--reserve-bytes", type=int, default=DEFAULT_RESERVE_BYTES)
     args = parser.parse_args()
     if args.action == "put":
-        result = put(args.source)
+        result = put(args.source, max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
     elif args.action == "get":
         result = get(args.name, args.into_directory)
-    else:
+    elif args.action == "list":
         result = list_files()
+    else:
+        store = storage()
+        if args.action == "quota":
+            result = quota(store)
+        elif args.action == "hash":
+            result = digest(store, args.name)
+        elif args.action == "trash":
+            result = to_trash(store, args.name, args.expect_sha256)
+        elif args.action == "trash-list":
+            result = trash_list(store)
+        elif args.action == "trash-info":
+            result = trash_info(store, args.restore_id)
+        elif args.action == "restore":
+            result = restore_trashed(store, args.restore_id, args.name, args.expect_sha256)
+        elif args.action == "replace":
+            source_fd = open_regular(args.source)
+            try:
+                result = replace_version(store, args.name, source_fd, args.expect_sha256,
+                                         max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
+            finally:
+                os.close(source_fd)
+        else:
+            raise RuntimeError("unknown action")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
