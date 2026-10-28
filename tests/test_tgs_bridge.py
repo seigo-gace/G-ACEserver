@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import urllib.error
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID,
@@ -142,6 +143,50 @@ class TgsBridgeTests(unittest.TestCase):
         body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
         self.assertEqual(send_gateway(body, "https://gateway.example",
                                       "dummy-internal-token", opener=Client()), "blocked")
+
+    def test_real_urllib_opener_never_forwards_bearer_on_redirect(self):
+        # Exercise urllib's real response/redirect chain, not just the guard
+        # method in isolation. No network request leaves this fake handler.
+        from email.message import Message
+
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                class FakeResponse:
+                    def __init__(self, url):
+                        self.code = self.status = status
+                        self.msg = "Redirect"
+                        self.url = url
+                        self.headers = Message()
+                        self.headers["Location"] = "https://untrusted.example/collect"
+
+                    def info(self): return self.headers
+                    def geturl(self): return self.url
+                    def read(self, *_args): return b""
+                    def close(self): pass
+
+                class FakeGateway(urllib.request.BaseHandler):
+                    handler_order = 100
+
+                    def __init__(self):
+                        self.calls = []
+
+                    def https_open(self, request):
+                        self.calls.append((request.full_url,
+                                           request.get_header("Authorization")))
+                        return FakeResponse(request.full_url)
+
+                gateway = FakeGateway()
+                opener = urllib.request.build_opener(_NoGatewayRedirect(), gateway)
+                request = urllib.request.Request(
+                    "https://gateway.example/internal/events", data=b"{}",
+                    method="POST", headers={"Authorization": "Bearer dummy-internal-token"})
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    opener.open(request, timeout=1)
+                self.assertEqual(error.exception.code, status)
+                self.assertEqual(gateway.calls, [
+                    ("https://gateway.example/internal/events",
+                     "Bearer dummy-internal-token"),
+                ])
 
     def test_default_gateway_opener_installs_redirect_guard(self):
         class FakeResponse:
