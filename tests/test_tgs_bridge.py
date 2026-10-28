@@ -9,8 +9,8 @@ import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID,
-                        gateway_endpoint, envelope, flush_once, send_gateway,
-                        validate)
+                        _NoGatewayRedirect, gateway_endpoint, envelope, flush_once,
+                        send_gateway, validate)
 
 
 def sample():
@@ -118,6 +118,44 @@ class TgsBridgeTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(BotEventError):
                 gateway_endpoint(url)
         self.assertEqual(gateway_endpoint("https://gateway.example"), "https://gateway.example/internal/events")
+
+    def test_gateway_redirects_never_forward_internal_bearer(self):
+        # urllib's default POST 301/302/303 handler can copy Authorization
+        # to a different origin. Our handler must refuse every redirect.
+        request = urllib.request.Request(
+            "https://gateway.example/internal/events", data=b"{}", method="POST",
+            headers={"Authorization": "Bearer dummy-internal-token"})
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                self.assertIsNone(_NoGatewayRedirect().redirect_request(
+                    request, None, status, "redirect",
+                    {"Location": "https://untrusted.example/collect"},
+                    "https://untrusted.example/collect"))
+
+    def test_redirect_response_blocks_until_gateway_url_is_repaired(self):
+        class Client:
+            def open(self, request, **_kwargs):
+                raise urllib.error.HTTPError(
+                    request.full_url, 302, "redirect",
+                    {"Location": "https://untrusted.example/collect"}, None)
+
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        self.assertEqual(send_gateway(body, "https://gateway.example",
+                                      "dummy-internal-token", opener=Client()), "blocked")
+
+    def test_default_gateway_opener_installs_redirect_guard(self):
+        class FakeResponse:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"receipt"}'
+
+        with patch("tgs_bridge.urllib.request.build_opener") as make_opener:
+            make_opener.return_value.open.return_value = FakeResponse()
+            body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+            self.assertEqual(send_gateway(body, "https://gateway.example",
+                                          "dummy-internal-token"), "ack")
+            self.assertIsInstance(make_opener.call_args.args[0], _NoGatewayRedirect)
 
     def test_exact_log_contract_and_no_user_data(self):
         payload = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
