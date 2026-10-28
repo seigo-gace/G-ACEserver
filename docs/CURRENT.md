@@ -1,4 +1,12 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Master判断：家庭用回線のSMB共有はセキュリティゲート先行
+
+- **Windows 11 Host直近実測PASS:** MasterがSource `423bb40...` に更新し `scripts/windows_lan_preflight.ps1` 実行。`TARGET_DIRECTORY=YES`, `SMB_SERVER_SERVICE=Running`, `PRIVATE_PROFILES=1`, `PUBLIC_PROFILES=0`, `GSERVER_SHARE_NAME_IN_USE=False`, `SMB_445_LISTENING=True`, `CHANGES=NONE`, `VERIFY=PASS`。これは**共有可能条件の一部**でありFirewall許可・WAN遮断・SMB dialect/暗号化/署名・妻PCの保護状態のPASSではない。`SMB1_REGISTRY_VALUE=REGISTRY_UNSET` / `SMB2_REGISTRY_VALUE=REGISTRY_UNSET` は実有効状態不明。LAN_FILE_TRANSFER=NOT_ENABLED_BY_THIS_CHECK。
+- **ユーザーのセキュリティ要請:** 家庭用回線だからと無保護で共有を始めず、プロキシ必要性と安全な通信プロトコルを事前評価する。家庭内2PC間の動画転送では一般的なHTTPプロキシは不要。Windows SMB2/3 + 共有単位の暗号化(`EncryptData`) + SMB signing + 専用非管理者アカウント + share/NTFS両ACL + Windows Defender Firewallの妻PC限定TCP445受信 + ルーターからWAN445への転送禁止 + WLAN WPA2-AES/WPA3を先行要件とした。SMB1/Guest/Everyone無制限/ルーター445公開は禁止。リモート利用が必要になったときだけ専用WireGuard系VPNを別途検討。
+- **Windows 10リスク:** 妻Windows10の一般サポートは2025-10-14終了。ただしMicrosoftの2026-10-28時点の公式説明ではConsumer ESU登録により2027-10-12まで保護可能な対象あり。妻PCのEdition/ESU/Windows Update/実IPは未観測。安全性を推測して書込み接続を許可しない。
+- **GitHub追加:** [`docs/architecture/LAN_SMB_SECURITY.md`](architecture/LAN_SMB_SECURITY.md) に脅威モデル・許可順・撤去/ロールバック・受入を記載。`scripts/windows_lan_security_readonly.ps1` を追加し、Master PCで未確認のSMB1機能状態、SMB signing registry、対象G: ACLのEveryone/Authenticated Users/Users broad write ACEを**匿名化したカウントで読取**。TCP445 firewallの遠隔許可範囲、Router WAN公開、妻PC更新状態は **NOT_VERIFIED** と明示し、結果がPASSでも**shareを作成しない**。実Host実行は未受領。Source commit `3bb54a1d23f023077c2c34217e4c5c55f27a1b43`。
+- **Exact Next:** このsecurity read-only scriptの実機結果のみ取得。危険なSMB1/広範Write ACEが出れば既存リソースを壊さず対象共有側で制限できるか先に設計。妻PC Windows10更新状態と最終IP範囲を確認してから新規専用資格情報・暗号化共有・スコープ限定Firewallを実行。既存Docker GserverとG: readback PASSに戻る反復は不要。
+
 ## 2026-10-28 Windows LAN事前検査：SHARE_NAME RemoteException修正
 
 - **実PC:** 2026-10-28 Master Windows11。GitHub `4b3bdaf...` まで fast-forward後、`WINDOWS_LAN_SMB_LIGHTWEIGHT_PREFLIGHT` 実行。`TARGET_DIRECTORY=YES`、`SMB_SERVER_SERVICE=Running`、`SMB1_REGISTRY_VALUE=REGISTRY_UNSET`、`SMB2_REGISTRY_VALUE=REGISTRY_UNSET`（**実際のSMB1/2有効無効とは同義ではない**）、`PRIVATE_PROFILES=1`、`PUBLIC_PROFILES=0`。その後 `PHASE=SHARE_NAME`→`FAILED_PHASE=SHARE_NAME`→`ERROR_TYPE=RemoteException`→`CHANGES=NONE`→`VERIFY=FAIL`。TCP 445未到達、共有名の衝突有無は不明、LAN転送未開始。Gserver Docker/G:保存の既存PASSはそのまま。
