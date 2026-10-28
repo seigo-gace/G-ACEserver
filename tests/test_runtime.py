@@ -221,7 +221,8 @@ class LifecycleTests(unittest.TestCase):
 
     def test_local_enable_disable_reuses_image_and_volume(self):
         self.controller.save({'current': self.old})
-        with patch.object(self.controller, 'run'):
+        # Test release transitions, not availability of the live server's host port.
+        with patch.object(ctl.socket, 'socket'), patch.object(self.controller, 'run'):
             self.controller.action('enable-local')
             self.assertEqual(self.controller.load(), {'current': self.old, 'access': 'loopback'})
             self.controller.action('start')
@@ -230,12 +231,21 @@ class LifecycleTests(unittest.TestCase):
 
     def test_local_failure_recovers_original_profile(self):
         self.controller.save({'current': self.old})
-        with patch.object(self.controller, 'run'), patch.object(self.controller, 'compose',
+        with patch.object(ctl.socket, 'socket'), patch.object(self.controller, 'run'), patch.object(self.controller, 'compose',
             side_effect=[subprocess.CalledProcessError(1, 'up'), None]) as compose:
             with self.assertRaises(subprocess.CalledProcessError):
                 self.controller.action('enable-local')
         self.assertEqual(compose.call_args_list[1].args[2], 'isolated')
         self.assertEqual(self.controller.load(), {'current': self.old})
+
+    def test_local_port_conflict_fails_before_any_docker_change(self):
+        self.controller.save({'current': self.old})
+        with patch.object(ctl.socket, 'socket') as create_socket, patch.object(self.controller, 'run') as run:
+            create_socket.return_value.__enter__.return_value.bind.side_effect = OSError(98, 'address in use')
+            with self.assertRaises(OSError):
+                self.controller.action('enable-local')
+            run.assert_not_called()
+            self.assertEqual(self.controller.load(), {'current': self.old})
 
     def test_enable_local_reconciles_existing_legacy_profile(self):
         self.controller.save({'current': self.old, 'access': 'loopback'})
@@ -248,7 +258,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_switch_to_loopback_recreates_container_with_volume_preserved(self):
         self.controller.save({'current': self.old})
-        with patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
+        with patch.object(ctl.socket, 'socket'), patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
             self.controller.action('enable-local')
         args = compose.call_args.args[1]
         self.assertIn('--force-recreate', args)
