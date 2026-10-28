@@ -29,8 +29,8 @@ FILES_ROOT = os.environ.get("GSERVER_FILES_ROOT", "")
 KB_ROOT = os.environ.get("GSERVER_KB_ROOT", "")
 BOT_SPOOL_DIR = os.environ.get("GSERVER_BOT_SPOOL_DIR", "")
 BOT_AUTH_FILE = os.environ.get("GSERVER_BOT_AUTH_FILE", "")
-BOT_GATEWAY_URL = os.environ.get("GSERVER_BOT_GATEWAY_URL", "")
-BOT_GATEWAY_TOKEN_FILE = os.environ.get("GSERVER_BOT_GATEWAY_TOKEN_FILE", "")
+BOT_GATEWAY_URL_FILE = os.environ.get("GSERVER_BOT_GATEWAY_URL_FILE", "/var/lib/gserver/gateway-url")
+BOT_GATEWAY_TOKEN_FILE = os.environ.get("GSERVER_BOT_GATEWAY_TOKEN_FILE", "/var/lib/gserver/gateway-token")
 FILES = Storage(G_MOUNT, FILES_ROOT) if FILES_ROOT else None
 
 logger = logging.getLogger("gserver")
@@ -202,7 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._json({"state": BotSpool(BOT_SPOOL_DIR).counts(),
-                            "tgs_delivery_configured": bool(BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE),
+                            "tgs_delivery_configured": (os.path.isfile(BOT_GATEWAY_URL_FILE)
+                                                       and os.path.isfile(BOT_GATEWAY_TOKEN_FILE)),
                             "read_only": True})
             except (BotEventError, OSError):
                 self._json({"error": "bot_queue_unavailable"}, 503)
@@ -348,9 +349,14 @@ def bot_gateway_worker(stop_signal):
     # Without an explicit gateway URL/token file, events stay in local SQLite.
     while not stop_signal.is_set():
         try:
-            if BOT_SPOOL_DIR and BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE:
+            if (BOT_SPOOL_DIR and os.path.isfile(BOT_GATEWAY_URL_FILE)
+                    and os.path.isfile(BOT_GATEWAY_TOKEN_FILE)):
+                url_file = Path(BOT_GATEWAY_URL_FILE)
+                if url_file.is_symlink() or url_file.stat().st_size > 300:
+                    raise BotEventError("GATEWAY_URL_FILE_UNSAFE")
+                url = url_file.read_text(encoding="ascii").strip()
                 token = gateway_token(BOT_GATEWAY_TOKEN_FILE)
-                result = flush_once(BotSpool(BOT_SPOOL_DIR), BOT_GATEWAY_URL, token, limit=10)
+                result = flush_once(BotSpool(BOT_SPOOL_DIR), url, token, limit=10)
                 if result["blocked"]:
                     logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
         except (BotEventError, OSError, ValueError):
@@ -362,7 +368,7 @@ if __name__ == "__main__":
     server = Server((HOST, PORT), Handler)
     worker_stop = threading.Event()
     worker = None
-    if BOT_SPOOL_DIR and BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE:
+    if BOT_SPOOL_DIR:
         worker = threading.Thread(target=bot_gateway_worker, args=(worker_stop,),
                                   name="gserver-tgs-relay", daemon=True)
         worker.start()
