@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Windows LAN事前検査：OutOfMemoryException→軽量段階式へ修正
+
+- **PC実測:** MasterがPowerShellでGitHub `4f3e026...` へfast-forward後、`scripts/windows_lan_preflight.ps1` 初回実行。結果 `PROJECT=Gserver`、`ACTION=WINDOWS_LAN_SMB_READ_ONLY_PREFLIGHT`、`ERROR_TYPE=OutOfMemoryException`、`CHANGES=NONE`、`VERIFY=FAIL`。初期版は単一try内で `Get-SmbServerConfiguration`・`Get-NetConnectionProfile`・**無制限の `Get-SmbShare` 全列挙**・`Get-NetTCPConnection` を実行し、失敗段階を出していなかったため、**どの操作でメモリ例外になったかは未確定**。Windows自体の物理RAM不足と断定しない。Gserver Docker/Volume・G:実ファイル保存は前回PASSのままであり、LAN共有を作成した証拠はない。
+- **Source改修:** `scripts/windows_lan_preflight.ps1` をcommit `ed918f02c61fe52598060997de1ae2b5d0b064d4` で軽量化。フル共有一覧と重いSMB CIM設定取得を廃止し、対象G:ディレクトリ存在/reparse、`LanmanServer` Service、SMB1/2レジストリ値（未設定なら `REGISTRY_UNSET` として推測しない）、接続プロファイル、固定共有名の競合を `net.exe share GserverTransfer` で調べる方式、.NETのローカル TCP445 listener に置換。各フェーズ前に `PHASE=...`、失敗時 `FAILED_PHASE=...` と例外クラスだけ表示し、ホスト固有IP・資格情報は出さない。全て読取専用、LAN共有作成/Firewall変更なし。
+- **Exact Next:** 実PCで最新Sourceへfast-forwardし同スクリプトを再度1回だけ実行。PASSなら実観測したService/Profile/445/共有名の条件に基づきSMB共有とNTFS ACLの最小化設計に進む。FAILなら `FAILED_PHASE` の箇所だけ調査・修正し、全体テスト/再ビルドはしない。WindowsのPublic→Private、SMB1、ゲスト、Everyone書込の勝手な有効化をしない。実転送/家族PC読戻し・Dev KB/TGSは未検証。
+
 ## 2026-10-28 家庭内動画転送：Windows標準SMBを再利用・読み取り専用事前検査Source
 
 - **新しい実行物:** `scripts/windows_lan_preflight.ps1` をコミット `5ad80bd2fa407b50d3795c79eba5c22d1824de5c` でGitHubへ追加。Master Windows 11 Host側で `G:\\GserverStorage\\files` の実ディレクトリとreparse拒否、SMB Serverサービス、SMB1/SMB2設定、アクティブなPrivate/Publicネットワークプロファイル、共有名衝突・既存対象共有・TCP445 Listen状態を**読み取り専用**で検査。原則GACE_RESULT包みで結果返却し、設定/パスワード/個別ローカルIP/他shareの実名を記録しない。Host実行は未受領。
