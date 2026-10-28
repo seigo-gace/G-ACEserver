@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 S2正式Dockerコンテナ起動 PASS｜次はローカル接続・G:マウント
+
+- **Master PC実測:** Windows PowerShell `wsl.exe -d Ubuntu -u gace -e bash -lc ...` から、検証済みアプリ/Compose/Controllerに差分がないことを確認し、`sudo docker --host unix:///var/run/docker.sock build --quiet --network=none` → `python3 scripts/gserverctl.py activate` → `status` を実行。`GSERVER_ACTIVATION=PASS`。専用Volume `gace-gserver_state` **Created**、専用Container `gace-gserver-gserver-1` **Up (healthy)**、image `sha256:3216607d7a54dd3daec5e6e88318e921f296b1ef650039f4195dc5c7122b7880`。**試験用ではなく実運用Controller管理下で起動中**。旧原本や他Service、G:の実データを触っていない。
+- **重要:** base Composeは `network_mode:none` + published port無し + G:/F: bind無し + auth credential未注入。現時点の `healthy` は**内側で/healthが200**のみ。通常ユーザーがWindows/WSLからHTTP接続できる、ファイルが使える、Dev KB/TGSが使えるという意味ではない。管理用CLI `scripts/gserverctl.py status|logs|stop|start` は本稼働Projectを対象にして使える。永続Volumeを消す `docker compose down -v` 等は厳禁。
+- **直近完了条件:** (1)既存host listening ports 8765と別port(例18765)の空き状況、および `/mnt/g` の実mount状態を最小限read-onlyで確認。(2)前段の固定immutable imageとrelease ledger/rollbackを壊さず**127.0.0.1限定HTTP公開**と管理者本人が指定したG:サブツリーへの最小権限bindを追加。(3)host HTTPヘルス/認証/Storage readback、既存service退行無し、Docker CLI restart/rollbackを実機確認。必要な秘密・実データパスは公開Repoに登録しない。(4)既存Dev KB・TGS・Backup/Restoreへ進める。**同じ隔離テストや同一Docker buildは繰り返さず**、管理UIを新規開発しない。Codexを自動起動・委任しない。
+- **注意:** Windows Host再起動後のWSL+Docker自動起動、実G:接続、外部TGS・KBは今なお未検証。F01–F08完成とは扱わない。
+
 ## 2026-10-28 Gserver S2隔離実機検証 PASS｜初めて実コンテナ起動を実証
 
 - **証拠:** Masterから Windows PowerShell → `wsl.exe -d Ubuntu -u gace` で一括実機試験 `bash scripts/verify_pc_runtime.sh` の完全な出力を受領。試験時PC source `SOURCE_SHA=6db18616b81fc158a553ee455c38cca15358c2a6`。**Python unittest 60/60 PASS、UI挙動4/4 PASS**、旧原本SHA固定stagingは実Docker container Healthy / internal `STAGING_HTTP=200` / host ports NONE。新packaged imageは実Docker build成功、専用隔離Container Healthy、再作成・stop/startのhealth、Volume内sentinel永続化PASS。
