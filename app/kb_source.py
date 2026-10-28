@@ -1,0 +1,186 @@
+"""Read-only Gserver adapter for the existing G-ACE Dev KB Current authority.
+
+No search engine, no index creation, no KB receiver, no network or filesystem writes.
+The authoritative KB implementation remains seigo-gace/gace-dev-kb.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+
+F_ROOT = Path("/mnt/f/G-ACE-KB")
+MAX_AUTH_JSON = 256 * 1024
+MAX_HASH_FILE = 2 * 1024 ** 3
+SHA = re.compile(r"^[0-9a-fA-F]{64}$")
+COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
+
+MARKER = ("data", "knowledge-records", "modulecatalog-reusable-active.json")
+CURRENT = ("data", "knowledge-sources", "accepted", "modulecatalog-reusable-current")
+INTAKE = ("data", "knowledge-intake", "modulecatalog")
+AUTH_HASHES = {
+    "formalKbSha256": ("data", "knowledge-records", "formal-kb.jsonl"),
+    "knowledgeRecordsSha256": CURRENT + ("knowledge-records.jsonl",),
+    "knowledgeMetadataSha256": CURRENT + ("knowledge-metadata.jsonl",),
+    "relationshipsSha256": CURRENT + ("relationships.jsonl",),
+    "casesSha256": CURRENT + ("cases.jsonl",),
+    "deliveryManifestSha256": CURRENT + ("delivery-manifest.json",),
+}
+
+
+class KBSourceError(Exception):
+    pass
+
+
+def _path(root, *parts):
+    current = root
+    if not root.is_absolute() or root.is_symlink():
+        raise KBSourceError("KB_ROOT_INVALID")
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise KBSourceError("KB_SYMLINK_REFUSED")
+    return current
+
+
+def _is_dir(root, *parts):
+    candidate = _path(root, *parts)
+    return candidate.is_dir()
+
+
+def _is_file(root, *parts):
+    candidate = _path(root, *parts)
+    return candidate.is_file()
+
+
+def _open_regular(root, parts):
+    path = _path(root, *parts)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(path, flags)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        os.close(fd)
+        raise KBSourceError("KB_FILE_TYPE_UNSAFE")
+    return fd, info.st_size
+
+
+def _read_json(root, parts):
+    fd, size = _open_regular(root, parts)
+    try:
+        if size > MAX_AUTH_JSON:
+            raise KBSourceError("KB_AUTH_JSON_TOO_LARGE")
+        data = bytearray()
+        while len(data) <= MAX_AUTH_JSON:
+            chunk = os.read(fd, min(65536, MAX_AUTH_JSON + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if len(data) > MAX_AUTH_JSON:
+            raise KBSourceError("KB_AUTH_JSON_TOO_LARGE")
+        try:
+            result = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            raise KBSourceError("KB_AUTH_JSON_INVALID") from None
+        if not isinstance(result, dict):
+            raise KBSourceError("KB_AUTH_JSON_INVALID")
+        return result
+    finally:
+        os.close(fd)
+
+
+def _sha256(root, parts):
+    fd, size = _open_regular(root, parts)
+    try:
+        if size > MAX_HASH_FILE:
+            raise KBSourceError("KB_HASH_FILE_TOO_LARGE")
+        actual = hashlib.sha256()
+        seen = 0
+        while True:
+            buf = os.read(fd, 1024 * 1024)
+            if not buf:
+                break
+            seen += len(buf)
+            if seen > MAX_HASH_FILE:
+                raise KBSourceError("KB_HASH_FILE_TOO_LARGE")
+            actual.update(buf)
+        if seen != size:
+            raise KBSourceError("KB_FILE_CHANGED")
+        return actual.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def inspect(root=F_ROOT, *, verify_hashes=False, enforce_mount=True):
+    root = Path(root)
+    if not root.is_absolute() or root.is_symlink():
+        raise KBSourceError("KB_ROOT_INVALID")
+    if root == F_ROOT and enforce_mount and not os.path.ismount("/mnt/f"):
+        raise KBSourceError("KB_F_MOUNT_UNAVAILABLE")
+    if not root.is_dir():
+        raise KBSourceError("KB_ROOT_NOT_PRESENT")
+    # These are three independent facts; a historical formal corpus is NOT
+    # evidence that the generalized ModuleCatalog Current was activated.
+    baseline = _is_file(root, "data", "knowledge-records", "formal-kb.jsonl")
+    corpus = _is_dir(root, "data", "knowledge-search", "records")
+    kb_repo = _is_file(root, "repo", "scripts", "check-modulecatalog-kb-runtime-windows.ps1")
+    runtime_exe = _is_file(root, "runtime", "mcp-vector-search", "Scripts", "mcp-vector-search.exe")
+
+    marker_present = _is_file(root, *MARKER)
+    journal = _path(root, *INTAKE, "activation-transaction.json")
+    if journal.exists() or journal.is_symlink():
+        raise KBSourceError("KB_ACTIVATION_TRANSACTION_UNRESOLVED")
+    if not marker_present:
+        return {
+            "current": "NOT_ACTIVATED_OR_NOT_FOUND",
+            "historical_formal_corpus_present": baseline,
+            "search_corpus_present": corpus,
+            "existing_kb_source_present": kb_repo,
+            "existing_windows_mvs_present": runtime_exe,
+            "kb_search_verified": False,
+            "changes": "NONE",
+        }
+    marker = _read_json(root, MARKER)
+    commit = marker.get("catalogCommit")
+    if not isinstance(commit, str) or not COMMIT.fullmatch(commit):
+        raise KBSourceError("KB_CATALOG_COMMIT_INVALID")
+    state = _read_json(root, CURRENT + ("runtime-state.json",))
+    receipt = _read_json(root, INTAKE + ("receipts", commit + ".json"))
+    for item in (marker, state, receipt):
+        if item.get("status") != "ACTIVE":
+            raise KBSourceError("KB_AUTHORITY_NOT_ACTIVE")
+        if item.get("catalogCommit") != commit:
+            raise KBSourceError("KB_AUTHORITY_COMMIT_MISMATCH")
+        if type(item.get("projectionSchemaVersion")) is not int or item["projectionSchemaVersion"] != 2:
+            raise KBSourceError("KB_AUTHORITY_SCHEMA_INVALID")
+    for key, parts in AUTH_HASHES.items():
+        expected = marker.get(key)
+        if not isinstance(expected, str) or not SHA.fullmatch(expected):
+            raise KBSourceError("KB_AUTHORITY_HASH_INVALID")
+        if any(item.get(key) != expected for item in (state, receipt)):
+            raise KBSourceError("KB_AUTHORITY_HASH_DISAGREEMENT")
+        if verify_hashes and _sha256(root, parts).lower() != expected.lower():
+            raise KBSourceError("KB_CURRENT_FILE_HASH_MISMATCH")
+    counts = {}
+    for key in ("totalFormalRecordCount", "knowledgeUnitCount", "relationshipCount", "caseCount"):
+        value = marker.get(key)
+        if type(value) is not int or value < 0 or value > 100000000:
+            raise KBSourceError("KB_AUTHORITY_COUNT_INVALID")
+        counts[key] = value
+    if counts["totalFormalRecordCount"] < counts["knowledgeUnitCount"]:
+        raise KBSourceError("KB_FORMAL_COUNT_INVALID")
+    if not baseline or not corpus or not kb_repo:
+        raise KBSourceError("KB_RUNTIME_DEPENDENCY_MISSING")
+    return {
+        "current": "ACTIVE_AUTHORITY_HASHED" if verify_hashes else "ACTIVE_AUTHORITY_CONSISTENT",
+        "catalog_commit": commit,
+        "counts": counts,
+        "historical_formal_corpus_present": baseline,
+        "search_corpus_present": corpus,
+        "existing_kb_source_present": kb_repo,
+        "existing_windows_mvs_present": runtime_exe,
+        "kb_search_verified": False,
+        "kb_mcp_deep_verified": False,
+        "kb_runtime_projection_verified": False,
+        "changes": "NONE",
+    }

@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Inspect the existing F: G-ACE KB Current from Gserver without changing it."""
+import argparse
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+from kb_source import inspect, KBSourceError, F_ROOT
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--root", type=Path, default=F_ROOT)
+    p.add_argument("--verify-hashes", action="store_true",
+                   help="Stream and verify six authoritative files; no indexing")
+    args = p.parse_args()
+    print("========== GACE_RESULT_BEGIN ==========")
+    print("PROJECT=Gserver")
+    print("ACTION=DEV_KB_CURRENT_READ_ONLY")
+    try:
+        result = inspect(args.root, verify_hashes=args.verify_hashes)
+        print("KB_CURRENT=" + result["current"])
+        print("HISTORICAL_FORMAL_PRESENT=" + str(result["historical_formal_corpus_present"]))
+        print("KB_SOURCE_PRESENT=" + str(result["existing_kb_source_present"]))
+        print("KB_SEARCH_CORPUS_PRESENT=" + str(result["search_corpus_present"]))
+        print("EXISTING_WINDOWS_MVS_PRESENT=" + str(result["existing_windows_mvs_present"]))
+        if "counts" in result:
+            print("KB_CATALOG_COMMIT=" + result["catalog_commit"])
+            for key, value in sorted(result["counts"].items()):
+                print("KB_" + key.upper() + "=" + str(value))
+        print("KB_SEARCH_E2E=NOT_VERIFIED")
+        print("KB_CURRENT_CUTOVER=NOT_PERFORMED")
+        print("F_SOURCE_MODIFIED=NONE")
+        print("CHANGES=NONE")
+        print("VERIFY=PASS")
+        return 0
+    except (KBSourceError, OSError, ValueError) as exc:
+        code = str(exc) if isinstance(exc, KBSourceError) else type(exc).__name__
+        print("KB_ERROR=" + code)
+        print("F_SOURCE_MODIFIED=NONE")
+        print("CHANGES=NONE")
+        print("VERIFY=FAIL")
+        return 1
+    finally:
+        print("PROJECT_END=Gserver")
+        print("========== GACE_RESULT_END ==========")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
