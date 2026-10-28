@@ -72,5 +72,19 @@ class CliMutations(unittest.TestCase):
         self.assertFalse(any(p.name.startswith('.gserver-part-') for p in self.files.iterdir()))
 
 
+    def test_purge_requires_cli_confirmation_and_matching_hash(self):
+        source = self.incoming / 'only.txt'
+        source.write_bytes(b'only test data')
+        saved = self.action('put', str(source))
+        trash = self.action('trash', 'only.txt', '--expect-sha256', saved['sha256'])
+        with self.assertRaises(ValueError):
+            self.action('purge', trash['restore_id'], '--expect-sha256', saved['sha256'])
+        with self.assertRaises(ValueError):
+            self.action('purge', trash['restore_id'], '--expect-sha256', '0' * 64, '--confirm-permanent')
+        self.action('purge', trash['restore_id'], '--expect-sha256', saved['sha256'], '--confirm-permanent')
+        self.assertEqual(self.action('trash-list')['entries'], [])
+
+
+
 if __name__ == '__main__':
     unittest.main()

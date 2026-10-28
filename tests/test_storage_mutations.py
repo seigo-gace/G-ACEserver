@@ -150,5 +150,33 @@ class Mutations(unittest.TestCase):
             restore(self.store, token, 'remove.txt', sha)
 
 
+    def test_failed_restore_preserves_trash_item(self):
+        f = self.root / 'backup.txt'
+        f.write_bytes(b'original')
+        sha = hashlib.sha256(b'original').hexdigest()
+        receipt = to_trash(self.store, 'backup.txt', sha)
+        with patch('storage_mutations._fsync_dir', side_effect=OSError(5, 'fsync failed')):
+            with self.assertRaises(OSError):
+                restore(self.store, receipt['restore_id'], 'backup.txt', sha)
+        self.assertFalse(f.exists())
+        self.assertEqual(trash_info(self.store, receipt['restore_id'])['sha256'], sha)
+
+    def test_failed_trash_unlink_keeps_original(self):
+        f = self.root / 'original.txt'
+        f.write_bytes(b'valuable')
+        sha = hashlib.sha256(b'valuable').hexdigest()
+        real_unlink = os.unlink
+        def fail_original(path, *args, **kwargs):
+            if path == 'original.txt':
+                raise OSError(5, 'simulated source unlink failure')
+            return real_unlink(path, *args, **kwargs)
+        with patch('storage_mutations.os.unlink', side_effect=fail_original):
+            with self.assertRaises(OSError):
+                to_trash(self.store, 'original.txt', sha)
+        self.assertEqual(f.read_bytes(), b'valuable')
+        self.assertEqual(trash_list(self.store)['entries'], [])
+
+
+
 if __name__ == '__main__':
     unittest.main()
