@@ -48,6 +48,8 @@ def attach(mount=TARGET, kb=KB, runner=subprocess.run):
     """Only one F: -> /mnt/f read-only mount, no fallback to read-write."""
     if mount != TARGET or kb != KB:
         raise MountGateError("MOUNT_PATH_NOT_APPROVED")
+    if mount.is_symlink() or kb.is_symlink():
+        raise MountGateError("UNSAFE_MOUNT_TARGET_SYMLINK")
     if os.geteuid() != 0:
         raise MountGateError("WSL_ROOT_REQUIRED")
     created = False
