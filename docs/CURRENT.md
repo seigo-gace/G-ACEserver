@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 LAN TCP445 Firewall残余63規則をPrivate/接続元で追加分類するSource
+
+- Master実機ログは下段の実測（811・Explicit TCP445=3、全3件app/service restricted、GENERIC_ANYPORT_OTHER=63、GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=37、POWERHSHELL_PARSE=PASS、変更なし）まで。3件の明示的TCP445許可と63件のgeneric候補は、すべて直ちにSMB到達を証明するものではない。任意portの広い規則を無視して「妻PCだけにFW新規Allowすれば確実に限定」とすることも不可。
+- **次のSource差分** `scripts/windows_lan_firewall_readonly.ps1` を増分分類。既存のread-only COMルール検査で、アプリ・サービス非限定generic候補の `GENERIC_ANYPORT_OTHER_PRIVATE`、`GENERIC_ANYPORT_OTHER_PRIVATE_NON_SINGLE_IP`、`GENERIC_ANYPORT_OTHER_PRIVATE_SINGLE_IP`、`GENERIC_ANYPORT_OTHER_NONPRIVATE` を匿名件数で出力。ローカルインターフェース・LocalAddresses・実効Firewallは依然 `NOT_VERIFIED` とする。`tests/test_windows_lan_probes_contract.py` の静的安全契約も更新。Commit `9af719f75301061b31969edf6900651255d21a46`。GitHub差分/構文の単純な整合は確認したが**新コードのWindows Parserおよび実行は未確認**。
+- 次のHost Gate: Master PC clean→git pull→対象unit→Windows `Parser.ParseFile`→成功時のみread-only Firewall実測。妻Windows10のESU/実IPv4、Router外部445、SMB暗号化とネットワーク共有は未検証。**ネットワーク共有もFirewall設定もまだ作成しない**。既存Gserver Docker・G:データ・LAN-Inbox ACL PASSは継続保持。
+
 ## 2026-10-28 Windows Firewall 445詳細分類実PC PASS｜広域実効アクセスは未検証
 
 - **Master PC実測:** GitHub `ea07f03...` へfast-forward、`test_windows_lan_probes_contract.py` 3/3 PASS、Windows PowerShell `Parser.ParseFile` `POWERSHELL_PARSE=PASS`。読み取り専用 `scripts/windows_lan_firewall_readonly.ps1` で `FIREWALL_RULES_INSPECTED=811`, `EXPLICIT_TCP445_ALLOW_RULES=3`, `EXPLICIT_TCP445_PRIVATE_ALLOW_RULES=1`, `EXPLICIT_TCP445_PRIVATE_NON_SINGLE_IP_RULES=1`, `EXPLICIT_TCP445_NONPRIVATE_ALLOW_RULES=2`, `EXPLICIT_TCP445_APP_SERVICE_RESTRICTED=3`, `GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=37`, `GENERIC_ANYPORT_OTHER=63`, `UNKNOWN_PORT_SCOPE_RULES=0`, `CHANGES=NONE`, `VERIFY=PASS`。`NOTE=COUNTS_ARE_RULES_NOT_PROOF_OF_SMB_REACHABILITY` の通り、到達性、WAN、wife限定はNOT_VERIFIED。
