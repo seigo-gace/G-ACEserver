@@ -142,11 +142,20 @@ def restore(store, token, name, expected_sha256):
                 sha, size = _hash_fd(fd)
                 if size != info.st_size or sha != expected_sha256:
                     raise ValueError('trash item changed / expected hash mismatch')
-                os.link(token, name, src_dir_fd=trash_fd, dst_dir_fd=folder, follow_symlinks=False)
-                _fsync_dir(folder)
-                os.unlink(token, dir_fd=trash_fd)
-                _fsync_dir(trash_fd)
-                return {'restored': name, 'bytes': size, 'sha256': sha}
+                linked = False
+                removed_from_trash = False
+                try:
+                    os.link(token, name, src_dir_fd=trash_fd, dst_dir_fd=folder, follow_symlinks=False)
+                    linked = True
+                    _fsync_dir(folder)
+                    os.unlink(token, dir_fd=trash_fd)
+                    removed_from_trash = True
+                    _fsync_dir(trash_fd)
+                    return {'restored': name, 'bytes': size, 'sha256': sha}
+                finally:
+                    if linked and not removed_from_trash:
+                        # Restore was not committed: original backup stays in trash.
+                        os.unlink(name, dir_fd=folder)
             finally:
                 os.close(fd)
         finally:
