@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F04 F:既存Currentの「実件数・実SHA・元Projection」3層照合Sourceへ進行
+
+- **確定したMaster実機:** F: read-only drvfs mount、KB root/原本/検索レコード全て存在、ACTIVE Current marker/state/receipt整合。Current宣言 `Formal=814 / Knowledge Units=720 / Relationships=720 / Cases=160`。まだ本物のMVS検索E2E/復元は未確認。
+- **追加実装:** `app/kb_source.py::verify_existing_counts()` は ACTIVE+SHA照合済みのCurrentを前提に、既存F:原本の `formal-kb.jsonl / knowledge-records.jsonl / knowledge-metadata.jsonl / relationships.jsonl / cases.jsonl` を1MiBずつ**read-only**ストリーミングで実件数照合する。ファイル/巨大レコード上限・nofollow/regular-file確認、宣言件数不一致時はfail closed。実件数を照合してからもう一度CurrentのSHA整合を読み返す。`scripts/gserver_kb.py`に`--verify-counts`を追加（自動的に6 source hashを先行確認）。既存`--verify-projection`は元Dev KB `verify_modulecatalog_runtime_projection.py` そのものを利用するため第2検索エンジンは作らない。新Source commits `7e5ca2b951a6bca9b328fbc5303b23dedad60081`, `2514747cf0b49e45d8c1529c4eea49a9dc61db69`。
+- **追加テスト:** `tests/test_kb_source.py`に実行データと宣言一致・hashは正しいが件数が異なる改ざん拒否・未ACTIVE拒否を3件追加（旧13→**計16件のsource tests**）。Source commit `f20dcec1d9f382206dfee2cfd2c6c7ed5004acfc`。**新16テストおよび実F:のhash/projectionはこの時点では未実行**。
+- **Exact Next Gate:** Master WSL clean checkoutからpullして`test_kb_source.py`16件を実行し、PASS時のみ`python3 scripts/gserver_kb.py --verify-counts --verify-projection`を実行。結果で`KB_CURRENT=ACTIVE_AUTHORITY_HASHED`、`KB_JSONL_CARDINALITIES=PASS`、`KB_EXISTING_RUNTIME_PROJECTION=EXISTING_KB_VERIFIER_PASS`の3条件を検証。これらは**MVS BM25/Vector/Hybrid/KG/MCPの実検索証明ではない**ため、通過したら既存Dev KBのWindows native search probeを再利用するF04 E2Eへ直結する。F:原本を移動/編集/再インデックスしない。
+
 ## 2026-10-28 F04 Master実PCでF:接続とCurrent ACTIVE実証｜次はファイル実SHA・既存Projection
 
 - **Master実測:** Windows `F:\\G-ACE-KB` は存在。Gserver checkout `386ab68` にfast-forward、`test_wsl_mount_kb_f_readonly.py` **5/5 PASS**。`scripts/wsl_mount_kb_f_readonly.py` が `mount -t drvfs -o ro F: /mnt/f` を明示一度だけ実施、`F_WSL_MOUNT=MOUNTED_READ_ONLY_VERIFIED` `KB_F_ROOT_VISIBLE=True` `F_WINDOWS_CONTENTS_CHANGED=NONE` `VERIFY=PASS`。続くWSL `gace` 利用者の `scripts/gserver_kb_mount_probe.py` は `F_KB_MOUNT_STATE=F_KB_ROOT_READABLE` `F_MOUNT_FILESYSTEM=9p` `KB_REPO_PRESENT=True` `KB_FORMAL_PRESENT=True` `KB_ACTIVE_MARKER_PRESENT=True` `KB_SEARCH_RECORDS_PRESENT=True` `F_SOURCE_MODIFIED=NONE` `VERIFY=PASS`。F:はGserverから**読み取り専用で参照できる状態になった**。

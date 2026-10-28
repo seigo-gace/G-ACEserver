@@ -5,7 +5,7 @@
 The authoritative KB remains seigo-gace/gace-dev-kb with mcp-vector-search 4.1.14 (BM25, Vector, Hybrid, Knowledge Graph, MCP). Gserver does not reimplement indexing, the receiver, activation, Current or rollback.
 
 - app/kb_source.py: reads the existing F:/G-ACE-KB (WSL /mnt/f/G-ACE-KB) ACTIVE marker, runtime-state and receipt. Requires the same 40-character commit, schema v2, ACTIVE status, matching six SHA256 declarations and valid counts.
-- scripts/gserver_kb.py: owner-only WSL CLI for inspecting the F: Current. The default mode reads only authority JSON and existence indicators; --verify-hashes checks six source files; --verify-projection calls the installed KB's original Python byte-exact runtime projection verifier, only when hash checks pass.
+- scripts/gserver_kb.py: owner-only WSL CLI for inspecting the F: Current. The default mode reads only authority JSON and existence indicators; --verify-hashes checks six source files; --verify-counts independently streams and counts the five authority JSONL files only after hash verification; --verify-projection calls the installed KB's original Python byte-exact runtime projection verifier, only when hash checks pass.
 - tests/test_kb_source.py: fixture-based tests for consistent/absent Current, tampering, uncommitted transaction, unsafe symlinks, missing original verifier, timeout and non-mutation.
 
 ## Status meanings
