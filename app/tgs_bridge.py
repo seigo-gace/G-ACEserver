@@ -216,11 +216,17 @@ def gateway_token(path):
     return token.decode("ascii")
 
 
+class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an internal Gateway bearer token to a redirect target."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def send_gateway(payload, endpoint, token, opener=None):
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
-    client = opener if opener is not None else urllib.request.build_opener()
+    client = opener if opener is not None else urllib.request.build_opener(_NoGatewayRedirect())
     try:
         with client.open(request, timeout=5) as response:
             code = response.status
