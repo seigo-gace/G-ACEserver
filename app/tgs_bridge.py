@@ -25,6 +25,7 @@ EVENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 KIND = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,47}$")
 MAX_PENDING = 5000
+MAX_SENT_RECEIPTS = 20000
 MAX_ATTEMPTS = 20
 MAX_BODY = 4096
 ALLOWED = {"bot.started", "bot.stopped", "bot.error", "bot.recovered",
@@ -49,12 +50,12 @@ def validate(value):
         raise BotEventError("INVALID_BOT")
     if not isinstance(eid, str) or not EVENT_ID.fullmatch(eid):
         raise BotEventError("INVALID_EVENT_ID")
-    if event not in ALLOWED:
+    if not isinstance(event, str) or event not in ALLOWED:
         raise BotEventError("INVALID_EVENT")
     level = value.get("level", "info")
     outcome = value.get("outcome", "PASS")
     code = value.get("error_code", "NONE")
-    if level not in LEVELS or outcome not in OUTCOMES:
+    if not isinstance(level, str) or not isinstance(outcome, str) or level not in LEVELS or outcome not in OUTCOMES:
         raise BotEventError("INVALID_LEVEL_OR_OUTCOME")
     if not isinstance(code, str) or not CODE.fullmatch(code):
         raise BotEventError("INVALID_ERROR_CODE")
@@ -175,6 +176,11 @@ class BotSpool:
                           status if state != "blocked" else "requires_operator", key))
             # Retain successful receipts for 7 days to deduplicate replays.
             conn.execute("DELETE FROM events WHERE state='sent' AND sent_at<?", (now - 7 * 86400,))
+            # A bounded retention window is necessary on a small owner PC.
+            conn.execute("""DELETE FROM events WHERE id IN (
+                SELECT id FROM events WHERE state='sent'
+                ORDER BY sent_at DESC,id DESC LIMIT -1 OFFSET ?
+            )""", (MAX_SENT_RECEIPTS,))
 
 
 def gateway_endpoint(url):
@@ -210,7 +216,9 @@ def send_gateway(payload, endpoint, token, opener=None):
         parsed = json.loads(body)
         if code != 202 or not isinstance(parsed, dict) or parsed.get("ok") is not True or parsed.get("duplicate") not in (True, False):
             return "retry"
-        if parsed.get("eventId") != payload["eventId"]:
+        # The Gateway returns its OWN persistent event UUID, not necessarily the
+        # producer-supplied idempotency eventId. Do not compare those two IDs.
+        if not isinstance(parsed.get("eventId"), str) or not parsed["eventId"]:
             return "retry"
         return "ack"
     except urllib.error.HTTPError as error:
