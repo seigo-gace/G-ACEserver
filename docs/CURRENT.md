@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 ローカルHTTPポート公開失敗→原因特定・修正反映（PC再確認待ち）
+
+- **実機失敗:** Masterが `git pull --ff-only` で `6690bfe...` に更新後、`tests/test_runtime.py` Python **26 PASS**、`sudo` PASS、`python3 scripts/gserverctl.py enable-local` で `Network gace-gserver_gserver-local Created`、Container `Healthy` を確認。しかし `curl http://127.0.0.1:18765/health` は `curl: (7) Failed to connect`。再実行しても status の PORTS は **`8765/tcp`だけ**でホスト公開無し。**GSERVER_LOCAL=PASSは出ていない。** Docker service本体は保持中。原因を「ユーザーがポートを閉じた」と扱わない。
+- **原因:** Docker Engine 29系 + Compose 5系の `internal: true` bridge 単独接続では、host-local publish要求が無視される報告（moby/moby discussion #53256）と完全一致。既存Controllerは`access=loopback`をledgerへ保存しても新実体へのnetwork/port反映を検証せず、2回目の`enable-local`で`ps`だけを返すため自己回復できなかった。
+- **修正Source:** `scripts/gserverctl.py` のloopback用snapshotを **新Manifest `*.loopback-v2.json`** で作成。新たに `gserver-local-v2` **通常bridge** に接続（従来の内部のみのネットワーク設定との衝突回避）、Host公開は**`127.0.0.1:18765:8765`固定のみ**。これはContainer outbound制限を旧`internal: true`と同一にはしないため、外向き通信防止が別途要件ならHost FWで検証する。局所公開とは区別する。image/Volume/old immutable snapshotsは削除しない。profile変更時`docker compose up -d --force-recreate --wait`を使い、失敗時旧版への強制再作成rollback。既にledger `access=loopback` のときも `enable-local` により再適用できる。回帰Unit **2件追加**、既存unitのnetwork期待更新。Commit **`8b7235164905558b7e30968f997b67b116780bd1`**。Source実装済み、**新修正のPC unittest/Runtimeは未受領**。
+- **Exact Next:** Master WSL `/mnt/g/Project/Gserver/repository`のclean state確認→`git pull --ff-only origin main`→変更のPython unittestのみ→`sudo -v`→`gserverctl.py enable-local`→`docker port ... 8765/tcp`でHost publishの実測→WSL `curl --fail http://127.0.0.1:18765/health`→Windows→WSL localhost forwarding確認。**同じ旧失敗コマンドをそのまま再実行させない**。合格後にG:マウント/本人の認可パスに進み、既存KB/TGS接続/復元を続ける。CI/本番G:/KB/TGSはNOT_VERIFIEDのまま。
+ 
 ## 2026-10-28 ローカル専用HTTP接続｜Source実装済、PC動作確認待ち
 
 - CHATが既存 `scripts/gserverctl.py` に `enable-local` / `disable-local` を追加。固定の **`127.0.0.1:18765:8765`** だけを公開するバージョン別SHA256固定Compose snapshot (`*.loopback.json`) を作成し、Docker networkは `internal: true`、既存Volume/image/release ledgerを維持する。ポートが埋まっていたら変更前に拒否。既存の8765/Python試作や他サービスを止めない。`start|stop|status|logs|rollback|recover` は選択中のlocal/isolated構成を再利用。`disable-local` で元の隔離構成へ戻す。**GitHub Source commit `16ca27d3ec7d053219e9ecb30fcdef389265a973`、回帰Unit 4件追加。PC実行・テストは未受領。**
