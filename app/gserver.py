@@ -17,7 +17,7 @@ from logging.handlers import RotatingFileHandler
 from urllib.parse import parse_qs, quote, urlsplit
 from storage import Storage, StorageUnavailable, InvalidPath, byte_range
 from kb_source import inspect as inspect_existing_kb, KBSourceError
-from tgs_bridge import BotSpool, BotEventError, flush_once, gateway_token, MAX_BODY
+from tgs_bridge import BotSpool, BotEventError, flush_once, gateway_token, gateway_access_headers, MAX_BODY
 
 HOST = os.environ.get("GSERVER_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GSERVER_PORT", "8765"))
@@ -357,6 +357,7 @@ def bot_gateway_worker(stop_signal):
                     raise BotEventError("GATEWAY_URL_FILE_UNSAFE")
                 url = url_file.read_text(encoding="ascii").strip()
                 token = gateway_token(BOT_GATEWAY_TOKEN_FILE)
+                gateway_access_headers()  # fail closed before claiming any queued event
                 result = flush_once(BotSpool(BOT_SPOOL_DIR), url, token, limit=10)
                 if result["blocked"]:
                     logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
