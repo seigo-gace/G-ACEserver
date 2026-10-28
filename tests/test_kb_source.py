@@ -34,6 +34,11 @@ class KBSourceTests(unittest.TestCase):
         return self._write(*parts, value=json.dumps(value, sort_keys=True).encode())
 
     def active(self):
+        # ACTIVE fixtures must contain both the accepted Current Markdown
+        # directory and the live search corpus, as production activation does.
+        # Without this, mocked subprocess tests fail at the prerequisite gate
+        # rather than reaching the behavior being tested.
+        (self.root.joinpath(*CURRENT) / "records").mkdir(parents=True, exist_ok=True)
         commit = "a" * 40
         hashes = {}
         for key, parts in AUTH_HASHES.items():
@@ -132,6 +137,17 @@ class KBSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(KBSourceError, "VERIFIER_MISSING"):
             verify_existing_projection(self.root, authority)
         self.assertFalse((self.root / "repo" / "scripts" / "verify_modulecatalog_runtime_projection.py").exists())
+
+    def test_projection_fails_when_accepted_corpus_is_missing(self):
+        self.active()
+        self._write("repo", "scripts", "verify_modulecatalog_runtime_projection.py", value=b"# mock")
+        authority = inspect(self.root, verify_hashes=True)
+        # Missing source records must fail before the original KB verifier runs.
+        self.root.joinpath(*CURRENT, "records").rmdir()
+        with patch("kb_source.subprocess.run") as launcher:
+            with self.assertRaisesRegex(KBSourceError, "CORPUS_MISSING"):
+                verify_existing_projection(self.root, authority)
+        launcher.assert_not_called()
 
     def test_projection_timeout_fails_closed_without_reporting_pass(self):
         self.active()
