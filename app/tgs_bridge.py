@@ -28,6 +28,8 @@ MAX_PENDING = 5000
 MAX_SENT_RECEIPTS = 20000
 MAX_ATTEMPTS = 20
 MAX_BODY = 4096
+ACCESS_CLIENT_ID_FILE = "/var/lib/gserver/gateway-access-client-id"
+ACCESS_CLIENT_SECRET_FILE = "/var/lib/gserver/gateway-access-client-secret"
 ALLOWED = {"bot.started", "bot.stopped", "bot.error", "bot.recovered",
            "bot.request.completed", "bot.request.failed", "bot.update.received",
            "bot.delivery.completed", "bot.delivery.failed"}
@@ -223,6 +225,40 @@ def gateway_token(path):
     return token.decode("ascii")
 
 
+def gateway_access_headers(id_file=None, secret_file=None):
+    """Optional Cloudflare Access service credentials, distinct from Gateway Bearer.
+
+    Missing both means a non-Access private HTTPS route. Partial, malformed or
+    symlinked files fail closed, including before the spool worker claims rows.
+    """
+    id_path = Path(id_file or ACCESS_CLIENT_ID_FILE)
+    secret_path = Path(secret_file or ACCESS_CLIENT_SECRET_FILE)
+    if not id_path.exists() and not secret_path.exists():
+        if id_path.is_symlink() or secret_path.is_symlink():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        return {}
+    values = []
+    for file, limit in ((id_path, 255), (secret_path, 4096)):
+        if file.is_symlink() or not file.is_file():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        st = file.stat()
+        if st.st_size > limit or st.st_mode & 0o077:
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        content = file.read_bytes()
+        if any(ch < 33 or ch > 126 for ch in content):
+            raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INVALID")
+        values.append(content)
+    client_id, client_secret = values
+    if not client_id and not client_secret:
+        return {}
+    if len(client_id) < 8 or len(client_secret) < 8:
+        raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INCOMPLETE")
+    return {
+        "CF-Access-Client-Id": client_id.decode("ascii"),
+        "CF-Access-Client-Secret": client_secret.decode("ascii"),
+    }
+
+
 class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
     """Never forward an internal API bearer credential across redirects."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -230,9 +266,11 @@ class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def send_gateway(payload, endpoint, token, opener=None):
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + token}
+    headers.update(gateway_access_headers())
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
+        method="POST", headers=headers)
     client = opener if opener is not None else urllib.request.build_opener(_NoGatewayRedirect())
     try:
         with client.open(request, timeout=5) as response:
