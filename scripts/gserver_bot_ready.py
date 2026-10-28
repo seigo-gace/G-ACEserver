@@ -20,7 +20,7 @@ MIN_AVAILABLE_BYTES = 2 * 1024 ** 3
 
 
 def run_tests():
-    for pattern in ("test_tgs_bridge.py", "test_runtime.py"):
+    for pattern in ("test_tgs_bridge.py", "test_runtime.py", "test_gserver_bot_ready_contract.py"):
         result = subprocess.run(
             [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests",
              "-p", pattern, "-q"], cwd=ROOT, check=False, timeout=180)
