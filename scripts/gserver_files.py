@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from storage import Storage, InvalidPath, StorageUnavailable, components
-from storage_mutations import digest, quota, to_trash, restore as restore_trashed, trash_list, trash_info, replace_version
+from storage_mutations import digest, quota, to_trash, restore as restore_trashed, trash_list, trash_info, replace_version, purge
 
 DRIVE = Path("/mnt/g")
 FILES = DRIVE / "GserverStorage" / "files"
@@ -159,6 +159,10 @@ def main():
     group.add_parser("trash-list", help="List up to 100 opaque recovery ids, without reading large video files")
     info = group.add_parser("trash-info", help="Calculate sha256 for one recovery id")
     info.add_argument("restore_id")
+    purge_parser = group.add_parser("purge", help="Permanently remove one trash ID, never a live filename")
+    purge_parser.add_argument("restore_id")
+    purge_parser.add_argument("--expect-sha256", required=True)
+    purge_parser.add_argument("--confirm-permanent", action="store_true")
     r = group.add_parser("restore", help="Restore an old version without overwriting existing files")
     r.add_argument("restore_id")
     r.add_argument("name")
@@ -188,6 +192,8 @@ def main():
             result = trash_list(store)
         elif args.action == "trash-info":
             result = trash_info(store, args.restore_id)
+        elif args.action == "purge":
+            result = purge(store, args.restore_id, args.expect_sha256, confirmed=args.confirm_permanent)
         elif args.action == "restore":
             result = restore_trashed(store, args.restore_id, args.name, args.expect_sha256)
         elif args.action == "replace":

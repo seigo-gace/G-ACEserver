@@ -300,3 +300,31 @@ def replace_version(store, name, source_fd, expected_sha256, *, max_bytes=None, 
                         pass
         finally:
             os.close(current_fd)
+
+
+def purge(store, token, expected_sha256, *, confirmed=False):
+    """Permanently free only one previously-trashed opaque token, never a live path."""
+    if not confirmed:
+        raise ValueError('explicit permanent purge confirmation required')
+    if not isinstance(token, str) or len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+        raise InvalidPath()
+    expected_sha256 = _verify(expected_sha256)
+    with store.directory() as folder:
+        trash_fd = _trash_dir(folder, create=False)
+        try:
+            fd = os.open(token, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=trash_fd)
+            try:
+                info = _check_metadata(fd, os.fstat(folder).st_dev)
+                sha, size = _hash_fd(fd)
+                now = os.stat(token, dir_fd=trash_fd, follow_symlinks=False)
+                if sha != expected_sha256 or size != info.st_size:
+                    raise ValueError('purge rejected: digest mismatch')
+                if (now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns, now.st_nlink) != (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_nlink):
+                    raise ValueError('purge rejected: source changed')
+                os.unlink(token, dir_fd=trash_fd)
+                _fsync_dir(trash_fd)
+                return {'purged_restore_id': token, 'bytes': size, 'sha256': sha}
+            finally:
+                os.close(fd)
+        finally:
+            os.close(trash_fd)

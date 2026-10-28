@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 from storage import Storage, InvalidPath
-from storage_mutations import digest, quota, to_trash, restore, trash_list, trash_info, replace_version
+from storage_mutations import digest, quota, to_trash, restore, trash_list, trash_info, replace_version, purge
 
 
 class Mutations(unittest.TestCase):
@@ -131,6 +131,23 @@ class Mutations(unittest.TestCase):
         self.assertEqual(live.read_bytes(), b'original')
         self.assertEqual(trash_list(self.store)['entries'], [])
         self.assertFalse(any(x.name.startswith('.gserver-part-') for x in self.root.iterdir()))
+
+    def test_permanent_purge_requires_explicit_confirmation_and_hash(self):
+        f = self.root / 'remove.txt'
+        f.write_bytes(b'original private bytes')
+        sha = hashlib.sha256(f.read_bytes()).hexdigest()
+        receipt = to_trash(self.store, 'remove.txt', sha)
+        token = receipt['restore_id']
+        with self.assertRaises(ValueError):
+            purge(self.store, token, sha)
+        with self.assertRaises(ValueError):
+            purge(self.store, token, '0' * 64, confirmed=True)
+        self.assertEqual(trash_info(self.store, token)['sha256'], sha)
+        result = purge(self.store, token, sha, confirmed=True)
+        self.assertEqual(result['bytes'], len(b'original private bytes'))
+        self.assertEqual(trash_list(self.store)['entries'], [])
+        with self.assertRaises(FileNotFoundError):
+            restore(self.store, token, 'remove.txt', sha)
 
 
 if __name__ == '__main__':
