@@ -41,6 +41,54 @@ class RuntimeTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
+    def post_json(self, path, data, token):
+        request = urllib.request.Request(
+            self.url + path,
+            data=json.dumps(data).encode("utf-8"),
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            method="POST")
+        try:
+            result = urllib.request.urlopen(request, timeout=3)
+        except urllib.error.HTTPError as error:
+            result = error
+        with result:
+            return result.status, json.loads(result.read())
+
+    def test_bot_events_require_separate_token_and_spool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_path = Path(tmp) / "bot-token"
+            token_path.write_text("b" * 32)
+            payload = {"bot": "profile-bot", "event_id": "u1",
+                       "event": "bot.started", "level": "info", "outcome": "PASS"}
+            with patch.object(app, "BOT_SPOOL_DIR", str(Path(tmp) / "spool")), \
+                 patch.object(app, "BOT_AUTH_FILE", str(token_path)):
+                status, body = self.post_json("/bot/events", payload, "x" * 32)
+                self.assertEqual(status, 401)
+                status, body = self.post_json("/bot/events", payload, "b" * 32)
+                self.assertEqual(status, 202)
+                self.assertEqual(body["status"], "queued")
+                status, body = self.post_json("/bot/events", payload, "b" * 32)
+                self.assertEqual(status, 202)
+                self.assertEqual(body["status"], "duplicate")
+                status, body = self.post_json("/bot/events", dict(payload, outcome="SKIP"), "b" * 32)
+                self.assertEqual(status, 409)
+                self.assertEqual(body["error"], "EVENT_ID_CONFLICT")
+                status, body = self.post_json("/bot/events", dict(payload, event_id="u2", message="private"), "b" * 32)
+                self.assertEqual(status, 400)
+                self.assertEqual(body["error"], "INVALID_EVENT_SCHEMA")
+                self.assertEqual(self.request("/bot/queue")[0], 401)
+                with patch.object(app, "TOKEN_FILE", str(self.credential)):
+                    st, raw = self.request("/bot/queue", "Bearer " + "x" * 32)
+                self.assertEqual(st, 200)
+                self.assertEqual(json.loads(raw)["state"]["pending"], 1)
+
+    def test_bot_events_disabled_by_default_without_secret(self):
+        payload = {"bot": "profile-bot", "event_id": "u1", "event": "bot.started"}
+        with patch.object(app, "BOT_SPOOL_DIR", ""), patch.object(app, "BOT_AUTH_FILE", ""):
+            status, body = self.post_json("/bot/events", payload, "a" * 32)
+            self.assertEqual(status, 503)
+            self.assertEqual(body["error"], "bot_integration_not_configured")
+
     def request(self, path, auth=None, extra_headers=None):
         headers = {"Authorization": auth} if auth else {}
         headers.update(extra_headers or {})
