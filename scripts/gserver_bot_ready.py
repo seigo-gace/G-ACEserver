@@ -30,9 +30,12 @@ def run_tests():
 
 
 def docker_preflight(controller):
-    controller.run(["info", "--format", "{{.DockerRootDir}}"], capture=True)
-    # Check Linux image store and containerd placement; avoid blind low-space build.
-    directories = (Path("/var/lib/docker"), Path("/var/lib/containerd"))
+    reported = controller.run(["info", "--format", "{{.DockerRootDir}}"], capture=True)
+    docker_root = Path(reported.stdout.strip())
+    if not docker_root.is_absolute() or not docker_root.is_dir() or docker_root.is_symlink():
+        raise RuntimeError("DOCKER_ROOT_UNKNOWN")
+    # Check both the actual image store and containerd placement before a build.
+    directories = (docker_root, Path("/var/lib/containerd"))
     checked = 0
     for path in directories:
         if path.is_dir():
