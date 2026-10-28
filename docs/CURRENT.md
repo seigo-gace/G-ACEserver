@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 S3ファイル転送｜PC unit error 3件を診断し共有Storage例外境界を修正
+
+- **実PC観測:** Masterの `git pull --ff-only` によりHost checkoutが `3c3aaa2...` へfast-forward。`python3 -m unittest discover -s tests -p test_gserver_files.py -q` が `Ran 5 tests` 中 `3 errors`。ケース `test_existing_symlink_and_out_of_scope_paths_rejected`、`test_failed_partial_write_leaves_no_published_file`、`test_round_trip_hash_and_no_overwrite` で本来 `FileExistsError/OSError` を報告する場所に `storage.StorageUnavailable` が発生。そのため `&&` により `put README.md` とG:実書込・CLI list・Docker storage-listは**一切実行されていない**。既存Docker/Volume/API read-onlyの前回PASSを否定しない。
+- **根本原因:** `app/storage.py` の `@contextmanager Storage.directory()` と `open_file()` が `yield` を `try ... except OSError` 内に入れていたため、呼出し元のファイル重複拒否や書込ディスク満杯まで mount失敗 `StorageUnavailable` に誤変換する構造バグ。単にtestの期待値を変更して隠さず、**directory/fileのopen+fstat段階のOSErrorのみStorageUnavailableへ変換し、yield後の利用者操作エラーはそのまま伝播**するよう実コードを修正。既存のpath traversal/リンク/mount拒否、close確保は維持。さらに `tests/test_storage.py` で `yield` 内でFileExistsErrorとENOSPCを発生させて伝播を確認する新unit追加。**Source commit `8be1c0e6730adc5e27815a1f56e4256b689ac1a9`**。
+- **現状と次:** GitHub Source修正は完了しPCの新test/実G:ファイル書込みは**未検証**。次は clean checkout→`git pull --ff-only`→**S3転送5 test+Storage unit**のみを実行してから、既存 `README.md` を新規保存（同名存在ならfail-closed）→CLI `list`→認証付きDocker `storage-list`、結果照合。旧Docker imageは変えないので再buildしない。既存G:原本/旧8765/LAN/KB/TGSは未変更。
+
 ## 2026-10-28 G:専用Docker readback実機PASS・Host CLIファイル転送Source追加
 
 - **Master PC実機:** Windows PowerShell → WSL `/mnt/g/Project/Gserver/repository` `git pull --ff-only` で `13fff7a...` へ進め、Python `33 tests in 17.054s OK`、`sudo -v`、`python3 scripts/gserverctl.py enable-storage`（既存専用Docker container `gace-gserver-gserver-1` healthy）、`python3 scripts/gserverctl.py storage-list` → `{"entries":[],"next":null}`、`status` → `127.0.0.1:18765->8765/tcp`、末尾 `GSERVER_STORAGE_READ=PASS`。**Windows G:の専用子フォルダーがDockerに読み取り専用接続され、認証済みAPIから一覧を取得できた。** データ未登録のため空一覧は正常。元のG:全体やF:原本への接続ではない。
