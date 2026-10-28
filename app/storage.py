@@ -25,7 +25,7 @@ def components(value):
     reserved = {'CON', 'PRN', 'AUX', 'NUL'} | {f'{prefix}{n}' for prefix in ('COM', 'LPT') for n in range(1, 10)}
     if any(p in ('', '.', '..') or len(p.encode()) > 255 or p.endswith(('.', ' '))
            or ':' in p or any(ord(c) < 32 for c in p)
-           or p.split('.')[0].upper() in reserved for p in parts):
+           or p.split('.')[0].upper() in reserved or p.casefold().startswith('.gserver-') for p in parts):
         raise InvalidPath()
     return parts
 
