@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Windows11 SMB security audit実機結果｜監査PASS・安全共有は未許可
+
+- **Master実測:** `git pull --ff-only origin main` で `f6f42a8` へ更新。初回セキュリティread-onlyで `VERIFY=PASS` だが内訳は `SMB1_OPTIONAL_FEATURE_STATE=NOT_VERIFIED`, `SMB_SIGNING_REQUIRED_REGISTRY=0`, `SMB_SIGNING_EFFECTIVE=NOT_VERIFIED`, `SMB_SHARE_ENCRYPTION_EFFECTIVE=NOT_VERIFIED`, `BROAD_WRITE_ACE_COUNT=2`, `ACL_UNRESOLVED_IDENTITY_COUNT=0`, `FIREWALL_445_REMOTE_SCOPE=NOT_VERIFIED`, `ROUTER_WAN_445_FORWARD=NOT_VERIFIED`, `WIFE_PC_SECURITY_PATCH_STATUS=NOT_VERIFIED`, `CHANGES=NONE`, `SMB_SHARE_CREATION=NOT_PERFORMED`。**検査成功≠安全共有の設定合格**。署名必須値0は既存Windows SMB serverで強制されないことを示すが、暗号化接続なら完全性保護を含み、署名欄だけで安全判定しない。Windows11ホストの署名を全共有に強制する変更は既存デバイス接続に影響しうるため無断でしない。
+- **リスク分類:** broad Write 2件は広いSIDグループに対するフォルダーACL許可の候補。まだ親から継承か、Everyone/Auth Users/Usersのどれか、Share ACLとの実効積、外部からの可視性は不明。標的G:フォルダーのACLを無断に変更しない。
+- **次のSource:** `scripts/windows_lan_acl_detail_readonly.ps1` を追加（commit `6516012d800cdbd0a00d020d44eeff96fb18c6a9`）。`G:\\GserverStorage` 親と `G:\\GserverStorage\\files` の広範書込グループ種別・権限・継承有無とG: filesystemだけ、個人名/秘密を出さずに読む。公式Microsoft SMB仕様に沿う設計補足は `docs/architecture/LAN_SMB_SECURITY.md` 更新済。**PC新probe未受領**。残ゲート: SMB1実状態/妻Windows10 ESUと実際のSMB dialect、暗号化/認証、Firewall wife-PC only、router WAN445非公開。
+- **次:** 新ReadOnly ACL詳細ゲート→G: subtreeだけの非破壊ACL計画・専用アカウントと共有権限/取消手順の実装。WAN/Firewall未確認では共有を公開しない。旧Gserver localhost18765、旧8765、F:原本は維持。
+
 ## 2026-10-28 Master判断：家庭用回線のSMB共有はセキュリティゲート先行
 
 - **Windows 11 Host直近実測PASS:** MasterがSource `423bb40...` に更新し `scripts/windows_lan_preflight.ps1` 実行。`TARGET_DIRECTORY=YES`, `SMB_SERVER_SERVICE=Running`, `PRIVATE_PROFILES=1`, `PUBLIC_PROFILES=0`, `GSERVER_SHARE_NAME_IN_USE=False`, `SMB_445_LISTENING=True`, `CHANGES=NONE`, `VERIFY=PASS`。これは**共有可能条件の一部**でありFirewall許可・WAN遮断・SMB dialect/暗号化/署名・妻PCの保護状態のPASSではない。`SMB1_REGISTRY_VALUE=REGISTRY_UNSET` / `SMB2_REGISTRY_VALUE=REGISTRY_UNSET` は実有効状態不明。LAN_FILE_TRANSFER=NOT_ENABLED_BY_THIS_CHECK。
