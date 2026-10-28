@@ -1,4 +1,15 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F03/GSR-S3-03 実装進行｜owner-onlyローカル更新・削除・復元・容量確認の実コードを追加
+
+- **目的へ復帰:** Master「未完成のまま説明で止めず開発を継続」の最新指示に従い、妻PC/SMB/プロキシ/Firewallの検査・設定を対象外にしたまま、Gserver F03の未実装を直接進めた。今回**コード変更**であり、文書のみの作業ではない。
+- **既存確認:** Docker/API 認証付き `/files` 一覧、`/download`、ホストCLI `put/get/list`、G:のREADME新規保存の過去実測PASS。今回の追加はデータ変更を伴うためWeb APIを安易に公開せず、OwnerだけがWSL terminalから使う `scripts/gserver_files.py` を拡張。
+- **新Source:** `app/storage_mutations.py` に `quota`、SHA256 `digest`、`replace_version`（旧版が指定shaと一致した場合のみ一時書込み→旧版リンク保管→`os.replace`で原子的切替）、`to_trash`（SHA必須・削除前に旧版を保管）、`trash_list`（opaque IDとサイズ）、`trash_info`、`restore`（SHA必須・既存ファイル上書き拒否）を実装。CLIには `hash/quota/trash/trash-list/trash-info/restore/replace` と `put --max-bytes/--reserve-bytes` を接続。デフォルト空き容量留保64MiB、転送は1MiBストリームでメモリ節約。
+- **隔離:** `app/storage.py` のpath component検証に `.gserver-*` hidden namespaceを追加し、`.gserver-trash`/書込み途中の `.gserver-part-*` を認証付き閲覧/取得APIからも遮断。Path traversal、symlink、硬リンク、想定SHA不一致、保存先容量不足をFail Closed。従来のAPI認証・Docker Compose・旧8765・G:/F:原本は変更しない。
+- **テスト:** `tests/test_storage_mutations.py` 7件（復元・上書き拒否、alias/symlink/hardlink、容量、書込み失敗時の原本維持、旧版原子的変更、ハッシュ違い）、`tests/test_storage_cli_mutations.py` 2件（CLI全工程・quota/限度/重複拒否）を追加。GPT作業環境内の隔離したLinux一時フォルダーで**9/9 PASS**。これは**Windows/WSLのG: NTFS DrvFS実機でのE2E PASSではない**。当該PCにGitHub sourceを取り込んだ実機テストは未実施。
+- **Host受入Source:** `scripts/verify_storage_mutations_host.py` はG:の既存files内に**一意の新しい小容量テストフォルダー**だけ作成、put→hash→replace→trash→restore→get→quotaを実行してSHA比較、試験用一時ディレクトリのみ自動片付け。既存README/動画原本/保護ACLを読込み変更せず、SMB/FWも触らない。模擬マウント上の受入テストはPASS、実G:は未実施。
+- **GitHub証拠:** `9293f3443b360362f443147d9454853b7690dd0a`（保存エンジン）、`ba2733ca99e1689c1238fb888931e95351d25cff`（CLI）、`dffb3fdbb271727d8beec919ef4c84c9be894735`（9テスト）、`a2cb1aadee991c3879a25772b5202ce395f88893`（復元障害時の原本維持）、`2bc0bd4765118857a1c37858ee882234a0a9a11e`（Host安全実測）。実Hostでdocker build/最終受入はまだ行っていない。
+- **Exact Next:** Master PC WSLの既存checkoutを`git pull --ff-only`、`python3 -m unittest discover -s tests -p test_storage_mutations.py` および `test_storage_cli_mutations.py` と旧 `test_storage.py`/`test_gserver_files.py` を実行、すべてPASSなら `python3 scripts/verify_storage_mutations_host.py` で**G:隔離新規テストのみ**実測。成功後はF03残ゲートの媒体切断/復元・容量逼迫・非同期誤終了への対処、F04 Dev KB/TGSの機能整合に連続接続。新しいWeb管理UIや妻PC/SMB等は作らない。
+
 ## 2026-10-28 Master最新判断｜妻PC利用・LAN/SMB共有の開発を中止し本来のGserverへ復帰
 
 - **Master明示要件変更:** 「嫁はつかわないので、よけいなことをしなくてもいい」。妻PCからのファイル転送・共有は不要。以後、妻PCのWindows/ESU/ネットワーク検査、SMB3暗号化共有の有効化、妻専用資格情報、TCP445ファイアウォール変更、LAN共有のロールバック機構、ルーター/VPN/プロキシ追加は**現行開発スコープ外**。旧「Exact Next: 妻PCで検査」は**すべて失効**。再開はMasterからの新たな明示依頼がある場合のみ。
