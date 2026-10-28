@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Windows LAN事前検査：SHARE_NAME RemoteException修正
+
+- **実PC:** 2026-10-28 Master Windows11。GitHub `4b3bdaf...` まで fast-forward後、`WINDOWS_LAN_SMB_LIGHTWEIGHT_PREFLIGHT` 実行。`TARGET_DIRECTORY=YES`、`SMB_SERVER_SERVICE=Running`、`SMB1_REGISTRY_VALUE=REGISTRY_UNSET`、`SMB2_REGISTRY_VALUE=REGISTRY_UNSET`（**実際のSMB1/2有効無効とは同義ではない**）、`PRIVATE_PROFILES=1`、`PUBLIC_PROFILES=0`。その後 `PHASE=SHARE_NAME`→`FAILED_PHASE=SHARE_NAME`→`ERROR_TYPE=RemoteException`→`CHANGES=NONE`→`VERIFY=FAIL`。TCP 445未到達、共有名の衝突有無は不明、LAN転送未開始。Gserver Docker/G:保存の既存PASSはそのまま。
+- **原因候補/修正:** Sourceで共有名の存在確認に `net.exe share GserverTransfer 2>$null` を使用。PowerShell停止優先 `$ErrorActionPreference='Stop'` では「共有が存在しない」場合のnative stderr処理が `RemoteException` を出すため誤停止し得る。Windows環境固有の詳細がないため根本を断定しない。**コマンドを取り除き**、HKLM `SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Shares` 内の単一名称 `GserverTransfer` の値存在を.NETの読取専用APIで判定。キー自体が読めなければ `UNKNOWN` を表示し、誤って「空き」と言わない。共有名の取得以外のフェーズ・設定は変更しない。Commit `c67f622bbb0b88d7ceeb2d2906fb300d86ac6278`。
+- **Exact Next:** Master PCのSourceをfast-forwardし `scripts/windows_lan_preflight.ps1` のReadOnly再実行（大規模再テスト、Docker再build不要）。TCP445と共有名readback後、実共有・NTFS ACL・認証・Firewallを対象Host最小権限で実装。以前のG: dedicated folderのみ対象、SMB1/Guest/Everyone無制限・WAN公開は禁止。Dev KB/TGS進捗は独立で継続。
+
 ## 2026-10-28 Windows LAN事前検査：OutOfMemoryException→軽量段階式へ修正
 
 - **PC実測:** MasterがPowerShellでGitHub `4f3e026...` へfast-forward後、`scripts/windows_lan_preflight.ps1` 初回実行。結果 `PROJECT=Gserver`、`ACTION=WINDOWS_LAN_SMB_READ_ONLY_PREFLIGHT`、`ERROR_TYPE=OutOfMemoryException`、`CHANGES=NONE`、`VERIFY=FAIL`。初期版は単一try内で `Get-SmbServerConfiguration`・`Get-NetConnectionProfile`・**無制限の `Get-SmbShare` 全列挙**・`Get-NetTCPConnection` を実行し、失敗段階を出していなかったため、**どの操作でメモリ例外になったかは未確定**。Windows自体の物理RAM不足と断定しない。Gserver Docker/Volume・G:実ファイル保存は前回PASSのままであり、LAN共有を作成した証拠はない。
