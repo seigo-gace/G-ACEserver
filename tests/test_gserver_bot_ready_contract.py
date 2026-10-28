@@ -19,7 +19,7 @@ class BotReadyDeploymentContract(unittest.TestCase):
 
     def test_docker_space_and_immutable_activation_gates(self):
         self.assertIn("MIN_AVAILABLE_BYTES = 2 * 1024 ** 3", self.content)
-        self.assertIn("controller.activate(image)", self.content)
+        self.assertIn("control.activate(image)", self.content)
         self.assertIn('image.startswith("sha256:")', self.content)
         self.assertIn('"--pull=false"', self.content)
 
