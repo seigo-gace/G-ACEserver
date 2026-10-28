@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 家庭内動画転送：Windows標準SMBを再利用・読み取り専用事前検査Source
+
+- **新しい実行物:** `scripts/windows_lan_preflight.ps1` をコミット `5ad80bd2fa407b50d3795c79eba5c22d1824de5c` でGitHubへ追加。Master Windows 11 Host側で `G:\\GserverStorage\\files` の実ディレクトリとreparse拒否、SMB Serverサービス、SMB1/SMB2設定、アクティブなPrivate/Publicネットワークプロファイル、共有名衝突・既存対象共有・TCP445 Listen状態を**読み取り専用**で検査。原則GACE_RESULT包みで結果返却し、設定/パスワード/個別ローカルIP/他shareの実名を記録しない。Host実行は未受領。
+- **設計判断:** 妻Windows 10から同じ家庭内Wi-Fi経由で4TB級動画を送る実用経路は、不要なGserver HTTP書込みAPI/Web管理UIを追加するよりWindows標準**SMB2/3の認証付き共有**で `G:\\GserverStorage\\files` のサブツリーだけを対象にする。既存Gserver HTTPは `127.0.0.1:18765` のまま。SMB1や匿名/ゲスト/Everyone無制限を有効化しない。**共有を作る/Firewallを変更する/ネットワークPublic→Privateを変更する操作はまだ実施していない**。その前に本人ホストの実設定とLAN到達の境界・専用Principal・NTFS ACL・無断公開の危険・復元経路を検討。
+- **Exact Next:** Master PCで `git pull --ff-only` 後に `powershell.exe -NoProfile -ExecutionPolicy Bypass -File G:\\Project\\Gserver\\repository\\scripts\\windows_lan_preflight.ps1` を実行して readback。実行結果で安全な既存条件を判断し、最小ACL・認証付きLAN共有・元に戻す機能へ進む。未検証共有を作成済みと報告しない。
+ 
 ## 2026-10-28 G:実ファイルコピー初成功｜保存・SHA256照合・認証付きAPI読戻しPASS
 
 - **Master PC実測**: WSL Ubuntuで `git pull --ff-only` により `ebd4ce3...` へfast-forward。最新 `app/storage.py` のcontextmanager修正を含む `python3 -m unittest discover -s tests -p test_gserver_files.py -q` = **5/5 PASS**、`python3 -m unittest discover -s tests -p test_storage.py -q` = **9/9 PASS**。Host CLI `python3 scripts/gserver_files.py put README.md` が `{"bytes":6226,"name":"README.md","sha256":"171b13dcef1bfd851eb88a3dd1090ff0a9a119e54850bab3cf58e90795a0bdeb"}` を返し、`cmp -s README.md /mnt/g/GserverStorage/files/README.md` 成功。CLI `list` = `README.md` file size 6226。sudo認証後のDocker `gserverctl.py storage-list` で認証付きAPIから同一実ファイルを読戻し。**`GSERVER_FILE_COPY=PASS`**。
