@@ -4,6 +4,9 @@ services:
     image: ${GSERVER_IMAGE:?immutable_image_required}
     pull_policy: never
     network_mode: none
+    environment:
+      GSERVER_BOT_SPOOL_DIR: /var/lib/gserver/bot-spool
+      GSERVER_BOT_AUTH_FILE: /var/lib/gserver/bot-auth-token
     read_only: true
     init: true
     user: "65534:65534"

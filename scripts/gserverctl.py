@@ -86,13 +86,15 @@ class Controller:
                     "          create_host_path: false\n"
                 )
                 source = source.replace(marker, marker + mount, 1)
-                env = (
-                    "    environment:\n"
+                extra = (
                     "      GSERVER_STORAGE_ROOT: /mnt/g\n"
                     "      GSERVER_FILES_ROOT: /mnt/g/files\n"
                     "      GSERVER_AUTH_FILE: /var/lib/gserver/auth-token\n"
                 )
-                source = source.replace("    read_only: true\n", env + "    read_only: true\n", 1)
+                marker_env = "    environment:\n"
+                if source.count(marker_env) != 1:
+                    raise ValueError("unexpected environment contract")
+                source = source.replace(marker_env, marker_env + extra, 1)
             if "$" in source:
                 raise ValueError("unresolved deployment variables")
             directory.mkdir(mode=0o700, exist_ok=True)
