@@ -25,7 +25,7 @@ try {
         # Never adopt or change an existing folder, including any inherited data.
         Write-Output 'INBOX_STATE=ALREADY_PRESENT_UNTOUCHED'
         Write-Output 'CHANGES=NONE'
-        $ok = $true
+        Write-Output 'REQUIRES_MANUAL_REVIEW=YES'
     } elseif (-not $Prepare) {
         Write-Output 'INBOX_STATE=ABSENT'
         Write-Output 'CHANGES=NONE'
@@ -46,8 +46,8 @@ try {
         )
         $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
         foreach ($id in $ids) {
-            $sid = New-Object Security.Principal.SecurityIdentifier $id.Sid
-            $rule = New-Object Security.AccessControl.FileSystemAccessRule ($sid, $id.Rights, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+            $sid = [Security.Principal.SecurityIdentifier]::new($id.Sid)
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, $id.Rights, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
             $acl.AddAccessRule($rule)
         }
         Set-Acl -LiteralPath $target -AclObject $acl -ErrorAction Stop
