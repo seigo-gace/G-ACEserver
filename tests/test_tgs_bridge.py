@@ -63,6 +63,32 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.counts()["sent"], 1)
         self.assertEqual(self.queue.claim(now=100000), None)
 
+    def test_real_gateway_202_ack_is_durable_across_restart(self):
+        class FakeResponse:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-receipt"}'
+
+        class Client:
+            def open(self, *_args, **_kwargs): return FakeResponse()
+
+        self.queue.accept(sample(), now=100)
+        result = flush_once(
+            self.queue, "https://gateway.example", "dummy",
+            sender=lambda payload, url, token: send_gateway(payload, url, token, opener=Client()))
+        self.assertEqual(result, {"sent": 1, "retry": 0, "blocked": 0})
+        restarted = BotSpool(self.folder / "queue")
+        self.assertEqual(restarted.counts(), {"pending": 0, "sending": 0, "blocked": 0, "sent": 1})
+        self.assertIsNone(restarted.claim(now=100000))
+
+    def test_unknown_sender_result_is_retry_not_false_ack(self):
+        self.queue.accept(sample(), now=100)
+        result = flush_once(self.queue, "https://gateway.example", "dummy", sender=lambda *_: "unexpected")
+        self.assertEqual(result, {"sent": 0, "retry": 1, "blocked": 0})
+        self.assertEqual(self.queue.counts()["pending"], 1)
+        self.assertEqual(self.queue.counts()["sent"], 0)
+
     def test_failure_keeps_unsent_until_retry(self):
         self.queue.accept(sample(), now=100)
         res = flush_once(self.queue, "https://gateway.example", "dummy", sender=lambda *_: "retry")

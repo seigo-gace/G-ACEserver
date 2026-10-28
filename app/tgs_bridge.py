@@ -254,8 +254,10 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
             result = sender(payload, url, token)
         except Exception:
             result = "retry"
-        if result not in done:
+        # "ack" is the sender result, while "sent" is only the metric key.
+        # Do not validate delivery outcomes against the metric dictionary.
+        if result not in ("ack", "retry", "blocked"):
             result = "retry"
-        spool.finish(key, "ack" if result == "ack" else result, attempts)
+        spool.finish(key, result, attempts)
         done["sent" if result == "ack" else result] += 1
     return done
