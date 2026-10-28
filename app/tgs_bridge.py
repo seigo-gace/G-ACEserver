@@ -4,6 +4,7 @@ No message body, user/chat ID or Telegram token is accepted or stored here.
 At-least-once HTTP delivery uses stable sourceId/eventId and Gateway 202 receipt.
 """
 import hashlib
+import contextlib
 import hmac
 import json
 import os
@@ -106,7 +107,7 @@ class BotSpool:
         return conn
 
     def _init(self):
-        with self.connect() as conn:
+        with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -124,8 +125,10 @@ class BotSpool:
         stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
         packed = json.dumps(envelope(event, occurred_at=stamp), sort_keys=True, separators=(",", ":"))
         key = "gserver:" + event["bot"] + ":" + event["event_id"]
-        fingerprint = hashlib.sha256(packed.encode()).hexdigest()
-        with self.connect() as conn:
+        # Idempotency compares the original Bot event, not the first-accept timestamp.
+        # Replays after restart/delay must remain duplicates, not false conflicts.
+        fingerprint = hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute("SELECT fingerprint FROM events WHERE id=?", (key,)).fetchone()
             if old:
@@ -140,14 +143,14 @@ class BotSpool:
             return {"status": "queued", "queued": True}
 
     def counts(self):
-        with self.connect() as conn:
+        with contextlib.closing(self.connect()) as conn, conn:
             values = dict(conn.execute("SELECT state,COUNT(*) FROM events GROUP BY state").fetchall())
             return {"pending": values.get("pending", 0), "sending": values.get("sending", 0),
                     "blocked": values.get("blocked", 0), "sent": values.get("sent", 0)}
 
     def claim(self, now=None):
         now = int(time.time() if now is None else now)
-        with self.connect() as conn:
+        with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT id,payload,attempts FROM events WHERE state IN ('pending','sending') "
@@ -165,7 +168,7 @@ class BotSpool:
             raise BotEventError("BAD_DELIVERY_STATUS")
         state = "sent" if status == "ack" else ("blocked" if status == "blocked" or attempts >= MAX_ATTEMPTS else "pending")
         delay = min(3600, 15 * 2 ** min(attempts, 8))
-        with self.connect() as conn:
+        with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? WHERE id=? AND state='sending'",
                          (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
