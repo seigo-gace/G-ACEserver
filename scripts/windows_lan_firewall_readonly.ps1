@@ -19,6 +19,10 @@ try {
     $anyPortGeneric = 0
     $anyPortAppService = 0
     $unknownPortScope = 0
+    $genericPrivate = 0
+    $genericPrivateBroadRemote = 0
+    $genericPrivateSingleIPv4 = 0
+    $genericNonPrivate = 0
     foreach ($rule in $policy.Rules) {
         $seen++
         if ($seen -gt 4000) { throw 'Firewall audit safety limit exceeded' }
@@ -55,7 +59,24 @@ try {
             (-not [string]::IsNullOrWhiteSpace($service) -and $service -ne '*')
         if ($isAnyPort -or $protocol -eq 256) {
             # Generic rules cannot be counted as explicit SMB permissions.
-            if ($restricted) { $anyPortAppService++ } else { $anyPortGeneric++ }
+            if ($restricted) {
+                $anyPortAppService++
+            } else {
+                $anyPortGeneric++
+                $profiles = [int]$rule.Profiles
+                $isPrivate = (($profiles -band 2) -ne 0) -or $profiles -eq 2147483647 -or $profiles -eq -1
+                $isOther = (($profiles -band 5) -ne 0) -or $profiles -eq 2147483647 -or $profiles -eq -1
+                if ($isPrivate) {
+                    $genericPrivate++
+                    $remote = [string]$rule.RemoteAddresses
+                    if ($remote -match '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') {
+                        $genericPrivateSingleIPv4++
+                    } else {
+                        $genericPrivateBroadRemote++
+                    }
+                }
+                if ($isOther) { $genericNonPrivate++ }
+            }
             continue
         }
         if (-not $has445) { continue }
@@ -81,8 +102,13 @@ try {
     Write-Output ('EXPLICIT_TCP445_APP_SERVICE_RESTRICTED=' + $explicitRestrictedAppService)
     Write-Output ('GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=' + $anyPortAppService)
     Write-Output ('GENERIC_ANYPORT_OTHER=' + $anyPortGeneric)
+    Write-Output ('GENERIC_ANYPORT_OTHER_PRIVATE=' + $genericPrivate)
+    Write-Output ('GENERIC_ANYPORT_OTHER_PRIVATE_NON_SINGLE_IP=' + $genericPrivateBroadRemote)
+    Write-Output ('GENERIC_ANYPORT_OTHER_PRIVATE_SINGLE_IP=' + $genericPrivateSingleIPv4)
+    Write-Output ('GENERIC_ANYPORT_OTHER_NONPRIVATE=' + $genericNonPrivate)
     Write-Output ('UNKNOWN_PORT_SCOPE_RULES=' + $unknownPortScope)
     Write-Output 'NOTE=COUNTS_ARE_RULES_NOT_PROOF_OF_SMB_REACHABILITY'
+    Write-Output 'LOCAL_ADDRESS_INTERFACE_SCOPE=NOT_VERIFIED'
     Write-Output 'FIREWALL_445_EFFECTIVE_ACCESS=NOT_VERIFIED'
     Write-Output 'WIFE_PC_IPV4=NOT_VERIFIED'
     Write-Output 'ROUTER_WAN_FORWARD=NOT_VERIFIED'
