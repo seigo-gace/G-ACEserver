@@ -75,25 +75,28 @@ class Storage:
         parts = self.prefix + components(path)
         fd = None
         try:
-            if not os.path.ismount(self.mount):
-                raise StorageUnavailable()
-            fd = os.open(self.mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            info = os.fstat(fd)
-            identity = (info.st_dev, info.st_ino)
-            with self.lock:
-                if self.identity is None:
-                    self.identity = identity
-                if identity != self.identity:
+            try:
+                if not os.path.ismount(self.mount):
                     raise StorageUnavailable()
-            for part in parts:
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                os.close(fd)
-                fd = child
-                if os.fstat(fd).st_dev != identity[0]:
-                    raise InvalidPath()
+                fd = os.open(self.mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                info = os.fstat(fd)
+                identity = (info.st_dev, info.st_ino)
+                with self.lock:
+                    if self.identity is None:
+                        self.identity = identity
+                    if identity != self.identity:
+                        raise StorageUnavailable()
+                for part in parts:
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    os.close(fd)
+                    fd = child
+                    if os.fstat(fd).st_dev != identity[0]:
+                        raise InvalidPath()
+            except OSError:
+                # Only mount/path acquisition failures mean unavailable storage.
+                # Do not swallow caller write errors raised after yielding the fd.
+                raise StorageUnavailable() from None
             yield fd
-        except OSError:
-            raise StorageUnavailable() from None
         finally:
             if fd is not None:
                 os.close(fd)
@@ -134,15 +137,16 @@ class Storage:
         with self.directory('/'.join(parts[:-1])) as parent:
             fd = None
             try:
-                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-                info = os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_dev != os.fstat(parent).st_dev:
-                    raise InvalidPath()
-                signature = f'{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}'
-                etag = '"' + hashlib.sha256(signature.encode()).hexdigest() + '"'
+                try:
+                    fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_dev != os.fstat(parent).st_dev:
+                        raise InvalidPath()
+                    signature = f'{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}'
+                    etag = '"' + hashlib.sha256(signature.encode()).hexdigest() + '"'
+                except OSError:
+                    raise StorageUnavailable() from None
                 yield fd, info.st_size, etag
-            except OSError:
-                raise StorageUnavailable() from None
             finally:
                 if fd is not None:
                     os.close(fd)

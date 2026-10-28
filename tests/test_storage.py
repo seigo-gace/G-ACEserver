@@ -84,6 +84,17 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 byte_range(value, 10)
 
+    def test_errors_from_caller_operations_are_not_misreported_as_missing_mount(self):
+        sample = self.root / 'sample'
+        sample.write_bytes(b'content')
+        with self.assertRaises(FileExistsError):
+            with self.store.directory() as fd:
+                raise FileExistsError(17, 'already exists')
+        with self.assertRaises(OSError) as failure:
+            with self.store.open_file('sample'):
+                raise OSError(28, 'no space')
+        self.assertEqual(failure.exception.errno, 28)
+
     def test_windows_alias_and_alternate_streams_rejected(self):
         for path in ['.. /private', 'file:secret', 'NUL', 'CON.txt', 'LPT1', 'folder./file', 'name\n']:
             with self.subTest(path=path), self.assertRaises(InvalidPath):
