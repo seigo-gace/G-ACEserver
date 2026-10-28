@@ -242,7 +242,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_gateway_preflight_executes_only_negative_validation_probe(self):
         payload = json.dumps({"url": "https://private.example", "token": "x" * 32})
-        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_PREFLIGHT=PASS\n")
+        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\n")
         with patch("ctl.subprocess.run", return_value=completed) as runner:
             self.controller.bot_gateway_preflight(payload)
         self.assertEqual(runner.call_count, 1)
