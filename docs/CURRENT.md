@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F03ストレージ作業を継続｜可逆更新・削除・容量管理＋永久削除を安全確認付きで実装、13件LOCAL PASS
+
+- **追加Source:** `app/storage_mutations.py` の `purge(store, restore_id, sha256, confirmed=True)` を追加。**既にゴミ箱へ退避した1つのopaque IDだけ**対象、元の生ファイル名は引数に取らない。正確なSHA256と明示確認なしでは拒否。実行前にnofollow/regular/single-link/device/size/mtime/shaを照合し、既存運用ファイルを削除対象にしない。`scripts/gserver_files.py purge <restore_id> --expect-sha256 ... --confirm-permanent` に接続。保管領域を明示的に開放するための危険操作として、勝手な自動purge/スケジュール削除はしない。Commit `227a63100f978e3564a26f35f68eba9260b6f362`。
+- **事故回帰テスト:** 追加3件は restore途中でfsync失敗→旧バックアップ保全、trashの元ファイルunlink失敗→原本維持、CLI purgeは確認必須/ハッシュ不一致拒否。`tests/test_storage_mutations.py` 10 tests + `tests/test_storage_cli_mutations.py` 3 tests、計**13/13 PASS（GPT隔離Linux環境）**。Commit `67b5f753efe71282b9d2e72cdc4b331e443feea2`。旧`test_storage.py`、旧`test_gserver_files.py` 及び実WSL G: E2Eは**この時点で未受領**。
+- **GitHub読戻し:** `app/storage.py` 保護namespace、`app/storage_mutations.py` のatomically backed version/restore/purge、既存Owner CLIへの`hash/quota/trash/restore/replace/purge`接続と元の`put/get/list`維持、G:新規隔離フォルダーのHost安全E2Eテスト、13回帰テストのSource存在を確認。
+- **Exact Next (非技術Masterは1ブロック実行):** `/mnt/g/Project/Gserver/repository` に`git pull --ff-only origin main`後、`python3 -m unittest discover -s tests -p 'test_storage*.py'`と旧 `test_gserver_files.py` の通過、通過後に`python3 scripts/verify_storage_mutations_host.py`でG:内**今回だけの新しい試験用ディレクトリ**で put→hash→replace→trash→restore→get→quota を実測する。本人の既存G:/F:ファイルを更新・削除しない。失敗時に無理に本番データで再試験しない。受入後にF04現行Dev KB/TGS連携や媒体断/復旧の残Taskへ移る。**F03/F01～F08全完成と誤記しない**。
+
 ## 2026-10-28 F03/GSR-S3-03 実装進行｜owner-onlyローカル更新・削除・復元・容量確認の実コードを追加
 
 - **目的へ復帰:** Master「未完成のまま説明で止めず開発を継続」の最新指示に従い、妻PC/SMB/プロキシ/Firewallの検査・設定を対象外にしたまま、Gserver F03の未実装を直接進めた。今回**コード変更**であり、文書のみの作業ではない。
