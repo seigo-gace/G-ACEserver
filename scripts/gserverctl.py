@@ -320,9 +320,14 @@ class Controller:
             "sys.path.insert(0,'/opt/gserver/app')\n"
             "from tgs_bridge import _NoGatewayRedirect,gateway_endpoint\n"
             "value=json.load(sys.stdin)\n"
+            "headers={'Content-Type':'application/json','Authorization':'Bearer '+value['token']}\\n"
+            "if bool(value.get('access_id'))!=bool(value.get('access_secret')):\\n"
+            " raise RuntimeError('GATEWAY_ACCESS_CREDS_INCOMPLETE')\\n"
+            "if value.get('access_id'):\\n"
+            " headers['CF-Access-Client-Id']=value['access_id']\\n"
+            " headers['CF-Access-Client-Secret']=value['access_secret']\\n"
             "req=urllib.request.Request(gateway_endpoint(value['url']),data=b'{}',"
-            "method='POST',headers={'Content-Type':'application/json',"
-            "'Authorization':'Bearer '+value['token']})\n"
+            "method='POST',headers=headers)\\n"
             "client=urllib.request.build_opener(_NoGatewayRedirect())\n"
             "try:\n"
             " with client.open(req,timeout=5): pass\n"
@@ -353,14 +358,23 @@ class Controller:
         token = getpass.getpass("Gateway INTERNAL_EVENT_API token (hidden): ")
         if not 24 <= len(token) <= 4096 or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
             raise ValueError("invalid Gateway bearer token")
-        payload = json.dumps({"url": url, "token": token})
+        access_id = getpass.getpass("Cloudflare Access Client ID (blank if not used): ")
+        access_secret = getpass.getpass("Cloudflare Access Client Secret (hidden): ") if access_id else ""
+        if access_id:
+            if (not 8 <= len(access_id) <= 255 or not 8 <= len(access_secret) <= 4096 or
+                    any(ord(c) < 33 or ord(c) > 126 for c in access_id + access_secret)):
+                raise ValueError("invalid Cloudflare Access service credentials")
+        payload = json.dumps({"url": url, "token": token,
+                              "access_id": access_id, "access_secret": access_secret})
         # Do not store the settings (or release queued events) until the
         # actual Gserver container verifies private HTTPS + Gateway auth.
         self.bot_gateway_preflight(payload)
         script = (
             "import json,os,secrets,sys\n"
             "values=json.load(sys.stdin)\n"
-            "for label,name in [('url','gateway-url'),('token','gateway-token')]:\n"
+            "for label,name in [('access_id','gateway-access-client-id'),"
+            "('access_secret','gateway-access-client-secret'),"
+            "('token','gateway-token'),('url','gateway-url')]:\\n"
             " p='/var/lib/gserver/'+name\n"
             " if os.path.islink(p): raise RuntimeError('SYMLINK_REFUSED')\n"
             " temp=p+'.tmp-'+secrets.token_hex(8)\n"
