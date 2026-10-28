@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 LAN TCP445残余63件のPrivate条件実PC PASS｜妻PCの読取ゲートへ進行
+
+- **Master PC実測:** Source `32eddee...` にfast-forward、`tests/test_windows_lan_probes_contract.py` Python `3/3 PASS`、Windows `Parser.ParseFile` `POWERSHELL_PARSE=PASS`、`scripts/windows_lan_firewall_readonly.ps1` `VERIFY=PASS`。全規則811。`EXPLICIT_TCP445_ALLOW_RULES=3` (Private 1、Privateかつnon-single-IP 1、nonPrivate 2、3件app/service restricted)。`GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=37`。`GENERIC_ANYPORT_OTHER=63`、`GENERIC_ANYPORT_OTHER_PRIVATE=63`、`GENERIC_ANYPORT_OTHER_PRIVATE_NON_SINGLE_IP=63`、`GENERIC_ANYPORT_OTHER_PRIVATE_SINGLE_IP=0`、`GENERIC_ANYPORT_OTHER_NONPRIVATE=63`、unknown port scopes0。既存Firewall/SMB/NTFSへの変更なし。**これはrule条件の件数であり、SMB445への実到達・ルーターWAN開放が証明されたわけではない**。LocalAddress/Interface/InterfaceTypes/EdgeTraversal/サービス実効スコープは未確認。新しい限定Allow規則を足すだけでは妻PC限定と保証できない。**813件等と誤記しない、実測は811件**。
+- **進め方:** 同じHostの広いルール件数調査を細切れで繰返さず、次は独立した妻PC側の現況確認と安全なSMB3暗号化共有の設計を進める。妻Win10の通常サポートは終了しているため、Windows build/22H2・Microsoft ESU加入・更新適用を実機で確認し、保護されていなければ**LANファイル共有開始は保留**。ソース `scripts/windows_wife_lan_readonly.ps1` を補強してアクティブPrivate/Public profile数とRFC1918 IPv4候補を読取るよう変更、commit `4b0f3a57790bd4a63fb4c4dfff92fcff7662b847`。ESUの加入/更新の本当の判定はUI等の別確認まで`NOT_VERIFIED`。妻PC側PC実測は**まだない**。
+- **受入ライン:** Local LAN-Inbox作成と個別ACL保護はPASS。妻PCからのSMB3暗号化接続・相互認証・実際の動画転送・SHA・旧Gserver無影響/停止・元戻しは未着手。Existing Gserver localhost127.0.0.1:18765および旧8765、G:/F:の原本を保護。家庭内TCP445をWANから公開しない。既存firewallルール811件への一括Disable/Resetは禁止。
+- **Exact Next:** 妻のWindows10端末PowerShellから、GitHubのimmutable commitに固定した `scripts/windows_wife_lan_readonly.ps1` を取得→Windows Parser.ParseFileをPASSさせてread-only実行。Windows release/build/Profile/RFC1918 IPv4候補を収集し、ESUと実パッチ適用は別証拠として確認。ネットワーク共有を今すぐ作らない。インターネットが使えない場合は手元へ手動転送して同scriptをオフライン実行。妻PC情報をGitHub公開Repoへコミットしない。
+
 ## 2026-10-28 LAN TCP445 Firewall残余63規則をPrivate/接続元で追加分類するSource
 
 - Master実機ログは下段の実測（811・Explicit TCP445=3、全3件app/service restricted、GENERIC_ANYPORT_OTHER=63、GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=37、POWERHSHELL_PARSE=PASS、変更なし）まで。3件の明示的TCP445許可と63件のgeneric候補は、すべて直ちにSMB到達を証明するものではない。任意portの広い規則を無視して「妻PCだけにFW新規Allowすれば確実に限定」とすることも不可。
