@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 ローカル専用HTTP接続｜Source実装済、PC動作確認待ち
+
+- CHATが既存 `scripts/gserverctl.py` に `enable-local` / `disable-local` を追加。固定の **`127.0.0.1:18765:8765`** だけを公開するバージョン別SHA256固定Compose snapshot (`*.loopback.json`) を作成し、Docker networkは `internal: true`、既存Volume/image/release ledgerを維持する。ポートが埋まっていたら変更前に拒否。既存の8765/Python試作や他サービスを止めない。`start|stop|status|logs|rollback|recover` は選択中のlocal/isolated構成を再利用。`disable-local` で元の隔離構成へ戻す。**GitHub Source commit `16ca27d3ec7d053219e9ecb30fcdef389265a973`、回帰Unit 4件追加。PC実行・テストは未受領。**
+- **即実機NEXT:** Master既存WSL checkoutで `git pull --ff-only origin main` → `python3 -m unittest discover -s tests -p test_runtime.py -q` の対象変更回帰テスト → `sudo -v` → `python3 scripts/gserverctl.py enable-local` → `curl -fsS http://127.0.0.1:18765/health` → `status`。変更/依存が不一致ならfail closedして原因箇所を修正する。以前PASSの隔離Runtime試験再実施・image再ビルド・Volume削除・Windows C:再調査は行わない。HTTP `/health` は非公開環境での通信経路確認に限り、G:/KB/TGSが使える証拠ではない。
+- この後、必要に応じてMasterから最小限の `/mnt/g` 実mount/readbackを取得し、認可対象subtree/秘密の安全なローカル注入だけを最小構成で仕上げる。公開RepoにHost秘密/実データを書かない。Windows reboot証拠未受領。
+
 ## 2026-10-28 S2正式Dockerコンテナ起動 PASS｜次はローカル接続・G:マウント
 
 - **Master PC実測:** Windows PowerShell `wsl.exe -d Ubuntu -u gace -e bash -lc ...` から、検証済みアプリ/Compose/Controllerに差分がないことを確認し、`sudo docker --host unix:///var/run/docker.sock build --quiet --network=none` → `python3 scripts/gserverctl.py activate` → `status` を実行。`GSERVER_ACTIVATION=PASS`。専用Volume `gace-gserver_state` **Created**、専用Container `gace-gserver-gserver-1` **Up (healthy)**、image `sha256:3216607d7a54dd3daec5e6e88318e921f296b1ef650039f4195dc5c7122b7880`。**試験用ではなく実運用Controller管理下で起動中**。旧原本や他Service、G:の実データを触っていない。
