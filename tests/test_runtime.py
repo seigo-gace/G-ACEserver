@@ -242,7 +242,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_gateway_preflight_executes_only_negative_validation_probe(self):
         payload = json.dumps({"url": "https://private.example", "token": "x" * 32})
-        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_PREFLIGHT=PASS\\n")
+        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_PREFLIGHT=PASS\n")
         with patch("ctl.subprocess.run", return_value=completed) as runner:
             self.controller.bot_gateway_preflight(payload)
         self.assertEqual(runner.call_count, 1)
@@ -258,10 +258,10 @@ class LifecycleTests(unittest.TestCase):
 
     def test_gateway_config_preflight_failure_never_saves_or_sends_queue(self):
         self.controller.save({"current": self.old})
-        with patch("builtins.input", return_value="https://private.example"), \\
-             patch("ctl.getpass.getpass", return_value="x" * 32), \\
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", return_value="x" * 32), \
              patch.object(self.controller, "bot_gateway_preflight",
-                          side_effect=ValueError("private gateway unavailable")) as probe, \\
+                          side_effect=ValueError("private gateway unavailable")) as probe, \
              patch("ctl.subprocess.run") as runner:
             with self.assertRaises(ValueError):
                 self.controller.action("bot-gateway-config")
@@ -270,10 +270,10 @@ class LifecycleTests(unittest.TestCase):
 
     def test_gateway_config_saves_only_after_preflight_passes(self):
         self.controller.save({"current": self.old})
-        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\\n")
-        with patch("builtins.input", return_value="https://private.example"), \\
-             patch("ctl.getpass.getpass", return_value="x" * 32), \\
-             patch.object(self.controller, "bot_gateway_preflight") as probe, \\
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", return_value="x" * 32), \
+             patch.object(self.controller, "bot_gateway_preflight") as probe, \
              patch("ctl.subprocess.run", return_value=result) as writer:
             self.controller.action("bot-gateway-config")
         probe.assert_called_once()
