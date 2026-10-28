@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Windows F:は存在、WSL /mnt/fは不在｜明示的なread-only DrvFs受入を実装
+
+- **実測 (Master):** Windows PowerShell `WINDOWS_F_DRIVE_PRESENT=True` / `WINDOWS_F_KB_ROOT_PRESENT=True`。Gserver main `2037812` をpull、`test_gserver_kb_mount_probe.py` 8/8 PASS、`test_runtime.py` 36/36 PASS。Gserver診断 `F_KB_MOUNT_STATE=WSL_F_PATH_MISSING`、`F_SOURCE_MODIFIED=NONE`、`VERIFY=PASS`。そのため `KB_CURRENT_INSPECTION=SKIPPED_F_MOUNT_NOT_READY`。**Windows原本とディスクは存在。WSLにF:接続が欠けているだけ。** 既存Dev KB Current/MVS/ModuleCatalogはまだ実測していない。
+- **実装:** `scripts/wsl_mount_kb_f_readonly.py` はユーザーが明示的に一度実行したときのみ、WSL rootで、空/不存在で安全な`/mnt/f`のみに `mount -t drvfs -o ro F: /mnt/f` を実行する。Linux `os.ST_RDONLY`を検証し、`G-ACE-KB` rootの存在確認。書込可能な既存mount/別mountやsymlinkを拒否、25秒timeout、今回だけに新規mountした場合の失敗時umountと空mountpoint rollback、`fstab`/`wsl.conf`/F:内容/既存G:データの変更なし。該当コマンド以外の自動/常駐マウントは作らない。Microsoft Learn公式WSL DrvFsの外付けNTFS Windowsドライブ接続方法に従う。`tests/test_wsl_mount_kb_f_readonly.py`に固定ドライブ、ro、root/既存mountガード、限定rollback、持続設定禁止、timeoutのsource/AST testsを追加。Source commits `c8a26d475e9b768a7ca63d17ff8d9968a477dcf2` / `9a000a85986c686c701235d9c50efb76476bc3d9`。**新5テストとroot mountは未実機実行**。
+- **Next:** Windows F:\G-ACE-KB existenceを再確認 → WSL repo clean/pull/新5テスト → Ownerが同PowerShellコマンドでrootのread-only drvfs attachを明示的に実行 → gaceユーザーで `scripts/gserver_kb_mount_probe.py` → `scripts/gserver_kb.py` read-only。後者が`NOT_ACTIVATED`でも旧formal baselineが別途存在し得るのでKBを勝手に移設/再索引しない。結果を基に既存MVS/Currentの正式受入に接続。F04はSOURCE_IMPLEMENTED/PC_F_MOUNT_GATE_PENDING、F03の以前の27テスト+実G:E2E PASSは保持。妻PC/SMB開発は無効のまま。
+
 ## 2026-10-28 F04実PC13/13 PASS、F: WSL非マウント→原因識別と認証付き参照APIを実装
 
 - **Master実測:** WSL Git checkout `00a2e50` fast-forward、`test_kb_source.py` **13/13 PASS**。続けて `scripts/gserver_kb.py` は `KB_ERROR=KB_F_MOUNT_UNAVAILABLE`、`F_SOURCE_MODIFIED=NONE`、`CHANGES=NONE`、`VERIFY=FAIL`。`set -e` で後続操作なし。**Dev KB破損/消失の証拠ではなく、WSL上で `/mnt/f` がmountとして確認できない**ことだけを示す。Windows F:自体の存在は未検証。F:原本を勝手に移動・マウント・上書きしない。
