@@ -34,7 +34,7 @@ class Controller:
         if access not in ("isolated", "loopback"):
             raise ValueError("invalid access profile")
         directory = self.state / "bundles"
-        manifest = directory / (image[7:] + (".loopback.json" if access == "loopback" else ".json"))
+        manifest = directory / (image[7:] + (".loopback-v2.json" if access == "loopback" else ".json"))
         if create and not manifest.exists():
             source = (ROOT / "deploy/compose.gserver.yaml").read_text()
             source = source.replace("${GSERVER_IMAGE:?immutable_image_required}", image)
@@ -45,7 +45,7 @@ class Controller:
                 source = source.replace(marker,
                     '    ports:\n      - "127.0.0.1:18765:8765"\n'
                     '    networks:\n      - gserver-local\n', 1)
-                source += "\nnetworks:\n  gserver-local:\n    internal: true\n"
+                source += "\nnetworks:\n  gserver-local:\n    driver: bridge\n"
             if "$" in source:
                 raise ValueError("unresolved deployment variables")
             directory.mkdir(mode=0o700, exist_ok=True)
@@ -152,10 +152,10 @@ class Controller:
                 raise ValueError("unowned Gserver project exists; inspect before adoption")
         self.write_atomic(self.pending, {"target": image, "access": access})
         try:
-            self.compose(image, ["up", "-d", "--wait", "--wait-timeout", "60"], access)
+            self.compose(image, ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], access)
         except (subprocess.SubprocessError, OSError):
             if old.get("current"):
-                self.compose(old["current"], ["up", "-d", "--wait", "--wait-timeout", "60"], old.get("access", "isolated"))
+                self.compose(old["current"], ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], old.get("access", "isolated"))
             else:
                 self.compose(image, ["stop", "--timeout", "10"])
             self.pending.unlink()
@@ -187,6 +187,10 @@ class Controller:
         if action in ("enable-local", "disable-local"):
             desired = "loopback" if action == "enable-local" else "isolated"
             if desired == release.get("access", "isolated"):
+                if desired == "loopback":
+                    # Reconcile a recorded loopback profile whose actual port was
+                    # silently omitted on an internal-only Docker 29 bridge.
+                    return self.activate(release["current"], access=desired)
                 return self.compose(release["current"], ["ps", "--all"], desired)
             if desired == "loopback":
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:

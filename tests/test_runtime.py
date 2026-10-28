@@ -214,7 +214,8 @@ class LifecycleTests(unittest.TestCase):
     def test_loopback_profile_keeps_isolated_snapshot_and_limits_host_port(self):
         source = self.controller.bundle(self.old, create=True, access='loopback').read_text()
         self.assertIn('127.0.0.1:18765:8765', source)
-        self.assertIn('internal: true', source)
+        self.assertIn('driver: bridge', source)
+        self.assertNotIn('internal: true', source)
         self.assertNotIn('network_mode: none', source)
         self.assertIn('network_mode: none', self.controller.bundle(self.old).read_text())
 
@@ -235,6 +236,24 @@ class LifecycleTests(unittest.TestCase):
                 self.controller.action('enable-local')
         self.assertEqual(compose.call_args_list[1].args[2], 'isolated')
         self.assertEqual(self.controller.load(), {'current': self.old})
+
+    def test_enable_local_reconciles_existing_legacy_profile(self):
+        self.controller.save({'current': self.old, 'access': 'loopback'})
+        with patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
+            self.controller.action('enable-local')
+        self.assertEqual(self.controller.load(), {'current': self.old, 'access': 'loopback'})
+        self.assertIn('--force-recreate', compose.call_args.args[1])
+        self.assertIn('driver: bridge', self.controller.bundle(
+            self.old, access='loopback').read_text())
+
+    def test_switch_to_loopback_recreates_container_with_volume_preserved(self):
+        self.controller.save({'current': self.old})
+        with patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
+            self.controller.action('enable-local')
+        args = compose.call_args.args[1]
+        self.assertIn('--force-recreate', args)
+        self.assertNotIn('down', args)
+        self.assertNotIn('--volumes', args)
 
     def test_loopback_profile_survives_image_update(self):
         self.controller.save({'current': self.old, 'access': 'loopback'})
