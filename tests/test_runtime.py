@@ -276,6 +276,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_storage_activation_keeps_same_image_and_volume(self):
         self.controller.save({'current': self.old, 'access': 'loopback'})
+        self.controller.bundle(self.old, create=True, access='loopback')
         with patch.object(ctl, 'prepare_storage'), patch.object(self.controller, 'ensure_token'), \
                 patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
             self.controller.action('enable-storage')
