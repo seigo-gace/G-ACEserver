@@ -261,7 +261,7 @@ class LifecycleTests(unittest.TestCase):
             "url": "https://private.example", "token": "z" * 32,
             "access_id": "cf-client-id-1234", "access_secret": "cf-secret-5678",
         })
-        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\\n")
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\n")
         with patch("ctl.subprocess.run", return_value=result) as runner:
             self.controller.bot_gateway_preflight(payload)
         script = runner.call_args.args[0][-1]
@@ -274,10 +274,10 @@ class LifecycleTests(unittest.TestCase):
 
     def test_gateway_config_accepts_optional_access_pair_without_cli_secret(self):
         self.controller.save({"current": self.old})
-        with patch("builtins.input", return_value="https://private.example"), \\
-             patch("ctl.getpass.getpass", side_effect=["z" * 32, "cf-client-id-1234", "cf-secret-5678"]), \\
-             patch.object(self.controller, "bot_gateway_preflight") as preflight, \\
-             patch("ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\\n")) as writer:
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["z" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight") as preflight, \
+             patch("ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")) as writer:
             self.controller.action("bot-gateway-config")
         self.assertEqual(preflight.call_count, 1)
         passed = json.loads(preflight.call_args.args[0])
