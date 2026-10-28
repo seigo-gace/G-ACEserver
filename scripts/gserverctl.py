@@ -91,7 +91,6 @@ class Controller:
                 extra = (
                     "      GSERVER_STORAGE_ROOT: /mnt/g\n"
                     "      GSERVER_FILES_ROOT: /mnt/g/files\n"
-                    "      GSERVER_AUTH_FILE: /var/lib/gserver/auth-token\n"
                 )
                 marker_env = "    environment:\n"
                 if source.count(marker_env) != 1:
