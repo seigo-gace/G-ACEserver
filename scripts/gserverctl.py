@@ -3,6 +3,8 @@
 import argparse
 import fcntl
 import hashlib
+import getpass
+import urllib.parse
 import json
 import os
 from pathlib import Path
@@ -246,6 +248,92 @@ class Controller:
         )
         self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
 
+    def bot_init(self):
+        # Credential remains in the existing private Docker named volume.
+        script = (
+            "import os,secrets,stat\n"
+            "p='/var/lib/gserver/bot-auth-token'\n"
+            "try:\n"
+            " f=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n"
+            "except FileExistsError:\n"
+            " f=None\n"
+            "if f is not None:\n"
+            " try:\n"
+            "  os.write(f,secrets.token_hex(32).encode())\n"
+            "  os.fsync(f)\n"
+            " finally:\n"
+            "  os.close(f)\n"
+            "s=os.stat(p,follow_symlinks=False)\n"
+            "assert stat.S_ISREG(s.st_mode) and s.st_uid==os.geteuid()\n"
+            "assert s.st_mode & 0o077 == 0 and 32<=s.st_size<=4096\n"
+        )
+        self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
+        print("GSERVER_BOT_TOKEN=INITIALIZED_PRIVATE_NO_OUTPUT")
+
+    def bot_status(self):
+        script = (
+            "import sys,json,os\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import BotSpool\n"
+            "p='/var/lib/gserver/bot-spool'\n"
+            "if os.path.isdir(p):\n"
+            " print('BOT_QUEUE='+json.dumps(BotSpool(p).counts(),sort_keys=True))\n"
+            "else:\n"
+            " print('BOT_QUEUE=NOT_INITIALIZED')\n"
+            "print('GATEWAY_CONFIGURED='+str(os.path.isfile('/var/lib/gserver/gateway-url') and os.path.isfile('/var/lib/gserver/gateway-token')))\n"
+        )
+        result = self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
+        print(result.stdout.rstrip())
+
+    def bot_smoke(self):
+        script = (
+            "import json,uuid,pathlib,urllib.request\n"
+            "token=pathlib.Path('/var/lib/gserver/bot-auth-token').read_text().strip()\n"
+            "value={'bot':'gserver-probe','event_id':'probe-'+uuid.uuid4().hex,'event':'bot.started','level':'info','outcome':'PASS'}\n"
+            "body=json.dumps(value).encode()\n"
+            "req=urllib.request.Request('http://127.0.0.1:8765/bot/events',data=body,method='POST',headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})\n"
+            "with urllib.request.urlopen(req,timeout=5) as response:\n"
+            " assert response.status==202\n"
+            " assert json.load(response)['queued'] is True\n"
+            "print('BOT_EVENT_LOCAL_DURABLE_ACCEPT=PASS')\n"
+        )
+        result = self.run(["exec","gace-gserver-gserver-1","python3","-c",script],capture=True)
+        print(result.stdout.rstrip())
+
+    def bot_gateway_config(self):
+        # Never pass the private internal API token in CLI args, source or stdout.
+        url = input("Gateway HTTPS base URL (/internal/events): ").strip()
+        parsed = urllib.parse.urlsplit(url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or
+                parsed.password or parsed.query or parsed.fragment or
+                parsed.path not in ("", "/", "/internal/events") or len(url) > 300):
+            raise ValueError("invalid private Gateway HTTPS URL")
+        token = getpass.getpass("Gateway INTERNAL_EVENT_API token (hidden): ")
+        if not 24 <= len(token) <= 4096 or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
+            raise ValueError("invalid Gateway bearer token")
+        payload = json.dumps({"url": url, "token": token})
+        script = (
+            "import json,os,secrets,sys\n"
+            "values=json.load(sys.stdin)\n"
+            "for label,name in [('url','gateway-url'),('token','gateway-token')]:\n"
+            " p='/var/lib/gserver/'+name\n"
+            " if os.path.islink(p): raise RuntimeError('SYMLINK_REFUSED')\n"
+            " temp=p+'.tmp-'+secrets.token_hex(8)\n"
+            " fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n"
+            " try:\n"
+            "  os.write(fd,values[label].encode('ascii'))\n"
+            "  os.fsync(fd)\n"
+            " finally:\n"
+            "  os.close(fd)\n"
+            " os.replace(temp,p)\n"
+            " os.chmod(p,0o600)\n"
+            "print('GATEWAY_PRIVATE_CONFIG=SET')\n"
+        )
+        result = subprocess.run(
+            self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", script],
+            input=payload, capture_output=True, text=True, timeout=30, check=True)
+        print(result.stdout.rstrip())
+
     def action(self, action, image=None):
         if action == "recover":
             return self.recover()
@@ -253,6 +341,17 @@ class Controller:
             raise ValueError("interrupted operation; run recover first")
         if action == "activate":
             return self.activate(image or "")
+        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-config"):
+            release = self.load()
+            if not release.get("current"):
+                raise ValueError("Gserver must be activated first")
+            if action == "bot-init":
+                return self.bot_init()
+            if action == "bot-status":
+                return self.bot_status()
+            if action == "bot-smoke":
+                return self.bot_smoke()
+            return self.bot_gateway_config()
         release = self.load()
         if action == "rollback":
             if not release.get("previous"):
@@ -309,7 +408,7 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list"])
+    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-config"])
     parser.add_argument("image", nargs="?")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
