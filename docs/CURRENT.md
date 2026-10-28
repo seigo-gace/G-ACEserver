@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 S3 storage test blocker｜稼働中18765ポート競合のテスト誤判定を修正
+
+- **PC実測:** `git pull` で `49c5b11...` へfast-forward後、`python3 -m unittest discover -s tests -p test_runtime.py -q` を実行。`32 tests` のうち `test_local_enable_disable_reuses_image_and_volume`、`test_local_failure_recovers_original_profile`、`test_switch_to_loopback_recreates_container_with_volume_preserved` が `OSError: [Errno 98] Address already in use`（`127.0.0.1:18765`）で失敗。**Gserverは既に18765番で稼働しているので正常な競合**。テストが実host socketをbindする欠陥で、Master/本番Gserver/ストレージ障害ではない。`sudo -v`以降は `&&` 連結で未実行なのでG: storage未接続のまま。既存serviceを止めたり、ポートを変えたりしてテストを通してはいけない。
+- **GitHub Source修正:** `tests/test_runtime.py` の該当3ケースで `ctl.socket.socket` のport probeだけをmockし、**実稼働18765へ依存しない**よう変更。反対に、port conflict時は実Dockerへ一切触れず拒否することを確認する独立unitを追加。Commit `1c889e7ecc29f02cd850aa58ad30440c8bf1d3a3`。GitHubで変更後コードを読戻し確認。**PC unit再実行/Storage API実機成功はこれから**。
+- **Exact Next:** PC clean Git→`git pull --ff-only`→対象unit（33件想定）→sudo→`gserverctl.py enable-storage`→`storage-list`→`status`。稼働中127.0.0.1:18765公開/既存Volume/image/旧serviceの保持を尊重。成功後にG:実ファイル送受信・Dev KB・TGS・隔離復元の未完成条件へ進む。失敗時は今回と違う箇所だけ修正し、重複した隔離smoke/再ビルドはしない。
+
 ## 2026-10-28 実PCローカルHTTP成功・G:専用読み取り接続を実装
 
 - **Host実測PASS:** MasterのWSL Ubuntu checkoutがGitHub `8090474...` までfast-forward。Python unit `28/28 PASS`、`sudo` PASS、`gserverctl.py enable-local` → Docker network `gace-gserver_gserver-local-v2` Created → Container `gace-gserver-gserver-1` Healthy。`docker port ... 8765/tcp` が **`127.0.0.1:18765`**、`curl http://127.0.0.1:18765/health` が **`{"status":"ok","service":"gserver"}`**。Compose `status` は `127.0.0.1:18765->8765/tcp`、末尾 **`GSERVER_LOCAL=PASS`**。PC Runtime接続ゲート合格。**Windows側のlocalhost到達/Windows再起動後自動再開はまだNOT_VERIFIED**。旧プロトタイプの8765・G:原本・TGS未変更。
