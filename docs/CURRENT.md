@@ -1,3 +1,13 @@
+## 2026-10-28 Codex / Bot PC受入・二分割の適用
+
+- **Owner / Source:** Issue #9 comment 6465378786を適用。作業branch `codex/bot-pc-acceptance-20261028`。GPT CHAT修正HEAD `6dbc0d5238b1eeeb4d0524f2c2c58f5acefbe8ef`をclean checkoutへfast-forward統合。Codexは `app/tgs_bridge.py` / `tests/test_tgs_bridge.py` を編集していない（修正branchとの差分0）。Codex修正commit `6d6b9dc`。
+- **修正:** Docker contextが必須importの `kb_source.py` / `tgs_bridge.py` を除外していたため、明示allowlistへ追加。既存KB機能の開発再開ではなくアプリ起動依存の修復。Owner認証ファイル設定を全Compose profileへ共通化しstorage profileの重複注入を除去。受入スクリプトはsudo拒否を `DOCKER_SUDO_AUTH_REQUIRED` と秘匿診断し、Bot検証失敗時には旧image/access/storageへ復帰（初回は停止、volume保持）。
+- **実行可能な受入:** `scripts/bot_acceptance.py` を `gserver_bot_ready.py --install` に接続。実loopback 18765のBot/Owner認証分離、202→duplicate→409、実image/module SHA照合、SQLite該当行のfingerprint/payload保持、既存Gserverだけstop/start後のduplicate/409を検証。秘密はprocess内のみ、proxyを使わない。合成correlation IDのみ出力。これらのDocker実行は未達。
+- **Local verification:** このWSLでbridge16、runtime41、deploy contract4、新acceptance8、計69 tests PASS。新8件には許可済みDocker contextだけを一時再現した実import、全profileのOwner設定、sudo診断秘匿、停止失敗時のstart試行、再起動後replay消失の拒否、受入失敗時rollbackを含む。Controller/Docker境界のmockは実機Docker PASSと区別。Compose isolated/loopback/storage 3構成config PASS、git diff --check PASS。CI=NOT_RUN。
+- **PC Runtime (実測):** `python3 scripts/gserver_bot_ready.py --install`を実行し、tests後Docker preflightでexit1。修正後診断=`DOCKER_SUDO_AUTH_REQUIRED`。Docker build/activation/Bot restartへ到達していない。既存loopback `/health` HTTP200、`/bot/queue` HTTP404でBot新版の受入は未完了。旧ローカルrelease recordにはimageがあるがdaemonによるimage再照合は未実施。既存Podman/Redis/site_total/btpanelはactive。docker/containerdの各store空き2GiB以上をread-only確認。既存原本・サービス設定・VPSは無変更。
+- **Gateway / TGserver / Telegram:** Gateway正本Internal Event APIとTGserver ZERO integrationを読戻し。P015/G002はsource登録済みという契約を確認。private Gateway設定/到達性/202、P015 live topic audit、TGserver配送、Telegram raw、中央Reader検索相関はいずれもNOT_VERIFIED。Source文書はLive証拠ではない。資格情報を別Projectから流用せず、VPS deploy/Topic作成/新Reader/新Workflowは実行していない。
+- **Rollback / Exact Next:** sudo本人認証の境界を解消し、既存WSL checkoutで `sudo -v && python3 scripts/gserver_bot_ready.py --install` をforeground実行。端末別sudo cacheなら同じ端末で行う（パスワードをチャットへ渡さない）。成功後に既存private Gatewayの正規設定・接続確認→P015 live state read-only audit→同一event IDのGateway受領/TGS/raw/中央検索→停止再送の実証。VPS変更が必要なら既存Owner権限へ戻す。F01-F08は未完了。追加AI・定期タスクなし。
+
 # CURRENT｜G-ACEserver
 ## 2026-10-28 Master優先変更：KB停止、GserverをTG Bot受け皿+既存TGserver ZEROへ最速実装
 

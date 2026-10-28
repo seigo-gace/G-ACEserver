@@ -24,7 +24,7 @@ SQLite uses WAL plus FULL synchronous, max 5000 outstanding, durable claims, bou
 - gserverctl bot-status: queue counts and private Gateway configuration state.
 - gserverctl bot-gateway-config: operator explicitly enters private HTTPS Gateway URL and token; values travel through Docker stdin and are written to private volume files, not argv, source or GitHub.
 - gserverctl bot-retry: explicitly requeue up to 100 blocked rows after fixing credentials/routing.
-- scripts/gserver_bot_ready.py --install: owner-only test, bounded Docker preflight, immutable image build, existing gserverctl activation/rollback, loopback access, Bot-only token creation, real local smoke and status. Does not modify Windows/WSL drive mounts, G:/F: originals or Contabo.
+- scripts/gserver_bot_ready.py --install: owner-only test, bounded Docker preflight, immutable image build, existing gserverctl activation/rollback, loopback access, Bot-only token creation, real local smoke and status. Acceptance also verifies the host loopback API, Bot/Owner authentication separation, duplicate/conflict semantics, runtime module hashes and SQLite persistence across an explicit Gserver stop/start. Failure restores the previous image and access/storage profile, or stops a first install while retaining its volume. Does not modify Windows/WSL drive mounts, G:/F: originals or Contabo.
 - Future Bot containers must be explicitly attached to an authorized Docker network and receive only the Bot secret; never reuse the Owner API token.
 
 ## Source vs live status
