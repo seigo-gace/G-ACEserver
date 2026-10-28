@@ -272,6 +272,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn('GSERVER_FILES_ROOT: /mnt/g/files', body)
         self.assertIn('GSERVER_AUTH_FILE: /var/lib/gserver/auth-token', body)
         self.assertNotIn('Bearer ', body)
+        self.controller.bundle(self.old, create=True, access='loopback')
         self.assertNotEqual(snapshot, self.controller.bundle(self.old, access='loopback'))
 
     def test_storage_activation_keeps_same_image_and_volume(self):
