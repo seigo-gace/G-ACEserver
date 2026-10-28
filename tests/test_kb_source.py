@@ -11,7 +11,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from kb_source import inspect, verify_existing_projection, KBSourceError, AUTH_HASHES, CURRENT, MARKER, INTAKE
+from kb_source import inspect, verify_existing_projection, verify_existing_counts, KBSourceError, AUTH_HASHES, CURRENT, MARKER, INTAKE
 
 
 class KBSourceTests(unittest.TestCase):
@@ -53,6 +53,51 @@ class KBSourceTests(unittest.TestCase):
         self._json(CURRENT + ("runtime-state.json",), data)
         self._json(INTAKE + ("receipts", commit + ".json"), data)
         return data
+
+    def _active_with_real_jsonl_counts(self):
+        authority = self.active()
+        for key, size in (
+            ("formalKbSha256", authority["totalFormalRecordCount"]),
+            ("knowledgeRecordsSha256", authority["knowledgeUnitCount"]),
+            ("knowledgeMetadataSha256", authority["knowledgeUnitCount"]),
+            ("relationshipsSha256", authority["relationshipCount"]),
+            ("casesSha256", authority["caseCount"]),
+        ):
+            blob = b'{"fixture":true}\n' * size
+            self._write(*AUTH_HASHES[key], value=blob)
+            authority[key] = hashlib.sha256(blob).hexdigest()
+        self._json(MARKER, authority)
+        self._json(CURRENT + ("runtime-state.json",), authority)
+        self._json(INTAKE + ("receipts", authority["catalogCommit"] + ".json"), authority)
+        return authority
+
+    def test_real_jsonl_cardinality_checks_correct_counts(self):
+        expected = self._active_with_real_jsonl_counts()
+        active = inspect(self.root, verify_hashes=True)
+        result = verify_existing_counts(self.root, active)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["counts"]["formal_records"], expected["totalFormalRecordCount"])
+        self.assertEqual(result["counts"]["reusable_records"], expected["knowledgeUnitCount"])
+        self.assertEqual(result["counts"]["metadata"], expected["knowledgeUnitCount"])
+        self.assertEqual(result["counts"]["relationships"], expected["relationshipCount"])
+        self.assertEqual(result["counts"]["cases"], expected["caseCount"])
+
+    def test_declared_counts_not_enough_to_pass_actual_inventory(self):
+        expected = self._active_with_real_jsonl_counts()
+        fewer = b'{"fixture":true}\n'
+        self._write(*AUTH_HASHES["relationshipsSha256"], value=fewer)
+        expected["relationshipsSha256"] = hashlib.sha256(fewer).hexdigest()
+        self._json(MARKER, expected)
+        self._json(CURRENT + ("runtime-state.json",), expected)
+        self._json(INTAKE + ("receipts", expected["catalogCommit"] + ".json"), expected)
+        active = inspect(self.root, verify_hashes=True)
+        with self.assertRaisesRegex(KBSourceError, "KB_CURRENT_COUNT_MISMATCH_RELATIONSHIPS"):
+            verify_existing_counts(self.root, active)
+
+    def test_non_active_cannot_check_actual_inventory(self):
+        current = inspect(self.root)
+        with self.assertRaisesRegex(KBSourceError, "KB_COUNTS_REQUIRE_HASHED_ACTIVE"):
+            verify_existing_counts(self.root, current)
 
     def test_absent_current_never_reports_active(self):
         result = inspect(self.root)
