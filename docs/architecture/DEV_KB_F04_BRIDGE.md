@@ -20,6 +20,8 @@ The authoritative KB remains seigo-gace/gace-dev-kb with mcp-vector-search 4.1.1
 
 ## Security and deployment boundary
 
+- Windows F: availability and WSL /mnt/f are separate facts. `scripts/gserver_kb_mount_probe.py` inspects the exact /proc/self/mountinfo mountpoint and known KB markers without auto-mounting or moving files. If F: is missing, do not fabricate activation or try alternate drives.
+- An authenticated Gserver `GET /kb` status route is source-implemented. It requires an explicit `GSERVER_KB_ROOT` and `os.path.ismount` for that KB root in the container, returns only a bounded status and existing KB presence flags, does not expose knowledge, hashes or paths, and returns 503 on missing/invalid KB. It does not rebuild the search engine or imply BM25/Vector/MCP search readiness. The default container has no F: bind mount or KB root option, so this route remains unavailable until deliberate isolated deployment.
 - The CLI is read-only. It does not modify F:, G:, Docker, Windows tasks, firewall, GitHub, KB acceptance, MVS indexes or Current. It adds no network API, token, automated agent or new search engine.
 - Default F: access fails closed when /mnt/f is not mounted. All inspected paths are fixed within the configured root; symlinks and non-regular authority files are rejected. Authority JSON is limited to 256KiB; deep hashes stream bounded data, capped at 2GiB per file.
 - The existing Windows KB health PowerShell command creates a receive lock and intake path, so it is not invoked automatically by this bridge. The optional projection check reuses only the original read-only Python byte-exact projection verifier and never emits KB content.

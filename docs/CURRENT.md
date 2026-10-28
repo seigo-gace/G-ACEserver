@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F04実PC13/13 PASS、F: WSL非マウント→原因識別と認証付き参照APIを実装
+
+- **Master実測:** WSL Git checkout `00a2e50` fast-forward、`test_kb_source.py` **13/13 PASS**。続けて `scripts/gserver_kb.py` は `KB_ERROR=KB_F_MOUNT_UNAVAILABLE`、`F_SOURCE_MODIFIED=NONE`、`CHANGES=NONE`、`VERIFY=FAIL`。`set -e` で後続操作なし。**Dev KB破損/消失の証拠ではなく、WSL上で `/mnt/f` がmountとして確認できない**ことだけを示す。Windows F:自体の存在は未検証。F:原本を勝手に移動・マウント・上書きしない。
+- **今回の実装:** `scripts/gserver_kb_mount_probe.py`（読取専用）にWSL mountinfoの**完全一致マウント位置**、実`os.path.ismount`、既知Dev KB root/正式 corpus/ACTIVE marker の固定パス確認を実装。`tests/test_gserver_kb_mount_probe.py`に8検証例（mount root欠落/未mount/正常mount/他mount誤認拒否/symlink/資料欠落/不正root等）追加。WindowsとWSLのFを別証拠として扱う。Source `927ca1ac81963d21614beb34f305f6f3123a2c9c`。静的source readback OK、**新8テストとWindows/WSL実行はまだ未検証**。
+- **F04製品API接続:** `app/gserver.py`に認証必須の `GET /kb` を追加。`GSERVER_KB_ROOT`で明示されたKBの**マウント済みrootだけ**を対象、設定なし/未mountは503、Current検証不一致は503、成功はstatusと3つの既知状態boolだけ返し、KB本文/承認token/hash/パスを返さない。旧API・G:保存・root/ready/health判定を変えず、`/kb` に疑似検索PASSを返さない。`tests/test_runtime.py`に新3テスト（認証/未mount、成功状態で情報漏えいなし、Current失敗時503）。Source commits `c288ff3b9e5762fadb957578d9d80f24983cb67f` / `c5522ff7a15b4bf5dc80ccdb27fbabb4a9cfbf27`。**Dockerへの適用・新APIの実Host応答は未検証**。
+- **次の実証ゲート:** Windows側 `F:\` と `F:\G-ACE-KB` の存在だけをread-only確認。同じコマンドでWSL側最新Gserver tests（mount probe8/KB13/既存runtimeとAPI）、`scripts/gserver_kb_mount_probe.py` を実行。WSL mount非可視ならF:の実所在とWindows側媒体アクセスを先に確定し、無断の `mount` やF:データ移設はしない。既存 KB MVS/KG/MCP/復元E2Eは F04 未完了のまま継続。
+
 ## 2026-10-28 F04 Master実機 Python検証で2件失敗 → ACTIVE模擬fixture修正
 
 - **Master WSL実測:** `git pull --ff-only` で `5433dd8` へ更新後、`python3 -m unittest discover -s tests -p test_kb_source.py -q` が**12 tests中 1 FAILURE, 1 ERROR**。該当: `test_existing_projection_probe_is_opt_in_read_only` が `KB_PROJECTION_CORPUS_MISSING`、`test_projection_timeout_fails_closed_without_reporting_pass` が同エラーのため期待した `KB_PROJECTION_VERIFIER_TIMEOUT` に進めなかった。**テスト用のACTIVE模擬Currentにrecordsディレクトリを作り忘れたことが原因**。F:本物の検査は`set -e`により未実行であり、F:原本や実KBの破損を示さない。
