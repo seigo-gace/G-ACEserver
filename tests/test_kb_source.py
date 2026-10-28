@@ -1,5 +1,6 @@
 """Read-only adaptation of existing gace-dev-kb Current authority; no MVS reimplementation."""
 import hashlib
+import subprocess
 import json
 import os
 from pathlib import Path
@@ -7,9 +8,10 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from kb_source import inspect, KBSourceError, AUTH_HASHES, CURRENT, MARKER, INTAKE
+from kb_source import inspect, verify_existing_projection, KBSourceError, AUTH_HASHES, CURRENT, MARKER, INTAKE
 
 
 class KBSourceTests(unittest.TestCase):
@@ -107,6 +109,43 @@ class KBSourceTests(unittest.TestCase):
         before = (marker.read_bytes(), marker.stat().st_mtime_ns)
         inspect(self.root, verify_hashes=True)
         self.assertEqual((marker.read_bytes(), marker.stat().st_mtime_ns), before)
+
+
+    def test_existing_projection_probe_is_opt_in_read_only(self):
+        self.active()
+        verifier = self._write("repo", "scripts", "verify_modulecatalog_runtime_projection.py", value=b"# mock")
+        authority = inspect(self.root, verify_hashes=True)
+        with patch("kb_source.subprocess.run", return_value=SimpleNamespace(
+                returncode=0, stdout="GACE_MODULECATALOG_RUNTIME_PROJECTION=PASS FILES=8", stderr="")) as mock:
+            result = verify_existing_projection(self.root, authority)
+        self.assertEqual(result["projection"], "EXISTING_KB_VERIFIER_PASS")
+        self.assertFalse(result["search_mcp_verified"])
+        command = mock.call_args.args[0]
+        self.assertIn(str(verifier), command)
+        self.assertIn("--expected-count", command)
+        self.assertIn("8", command)
+        self.assertIn("-B", command)
+
+    def test_missing_projection_verifier_does_not_create_one(self):
+        self.active()
+        authority = inspect(self.root, verify_hashes=True)
+        with self.assertRaisesRegex(KBSourceError, "VERIFIER_MISSING"):
+            verify_existing_projection(self.root, authority)
+        self.assertFalse((self.root / "repo" / "scripts" / "verify_modulecatalog_runtime_projection.py").exists())
+
+    def test_projection_timeout_fails_closed_without_reporting_pass(self):
+        self.active()
+        self._write("repo", "scripts", "verify_modulecatalog_runtime_projection.py", value=b"# mock")
+        authority = inspect(self.root, verify_hashes=True)
+        with patch("kb_source.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="kb", timeout=1)):
+            with self.assertRaisesRegex(KBSourceError, "VERIFIER_TIMEOUT"):
+                verify_existing_projection(self.root, authority)
+
+    def test_unactivated_current_cannot_trigger_projection(self):
+        result = inspect(self.root)
+        with self.assertRaisesRegex(KBSourceError, "REQUIRES_HASHED_ACTIVE"):
+            verify_existing_projection(self.root, result)
+
 
 
 if __name__ == "__main__":
