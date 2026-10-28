@@ -8,6 +8,7 @@ import signal
 import threading
 import time
 import socket
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -149,7 +150,7 @@ class Handler(BaseHTTPRequestHandler):
         except BotEventError as error:
             status = 409 if error.code == "EVENT_ID_CONFLICT" else (503 if error.code == "SPOOL_FULL" else 400)
             self._json({"error": error.code}, status)
-        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+        except (sqlite3.Error, OSError, ValueError, UnicodeError, json.JSONDecodeError):
             self._json({"error": "bot_event_unavailable"}, 503)
 
     def do_GET(self):
@@ -205,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
                             "tgs_delivery_configured": (os.path.isfile(BOT_GATEWAY_URL_FILE)
                                                        and os.path.isfile(BOT_GATEWAY_TOKEN_FILE)),
                             "read_only": True})
-            except (BotEventError, OSError):
+            except (BotEventError, sqlite3.Error, OSError):
                 self._json({"error": "bot_queue_unavailable"}, 503)
             return
 
@@ -359,7 +360,7 @@ def bot_gateway_worker(stop_signal):
                 result = flush_once(BotSpool(BOT_SPOOL_DIR), url, token, limit=10)
                 if result["blocked"]:
                     logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
-        except (BotEventError, OSError, ValueError):
+        except (BotEventError, sqlite3.Error, OSError, ValueError):
             logger.warning("bot_gateway_retryable_or_config_error")
         stop_signal.wait(20)
 
