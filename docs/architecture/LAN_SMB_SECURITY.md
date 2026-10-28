@@ -5,7 +5,7 @@ Master Windows 11 の \`G:\GserverStorage\files\` だけを、妻 Windows 10 か
 
 ## 脅威と通信方式
 - 自宅回線でも、マルウェア感染端末・古いWindows・偽のWi-Fi接続・ルーター設定不備・共有資格情報の漏えいが脅威。回線種別が家庭用であることは暗号化やアクセス制限の代替ではない。
-- **同一宅内**: 別のHTTPプロキシ/リバースプロキシを立てず Windows標準 SMB 3.x (SMB2/3 family) を利用。必要なら共有単位でSMB encryption（\`New-SmbShare -EncryptData $true\`）を有効化し、SMB signingを要求。SMB1とゲスト/匿名ログオンは使用せず、有効化しない。SMB署名・暗号化の実有効性は接続成功時に readback。クライアントWindows 10とWindows 11双方の実バージョン/対応を確認する。SMB署名と暗号化は機能が異なる。
+- **同一宅内**: 別のHTTPプロキシ/リバースプロキシを立てず Windows標準 SMB 3.x (SMB2/3 family) を利用。新規共有では共有単位でSMB encryption（\`New-SmbShare -EncryptData $true\`）を有効化し、SMB signingを要求。SMB1とゲスト/匿名ログオンは使用せず、有効化しない。SMB署名・暗号化の実有効性は接続成功時に readback。クライアントWindows 10とWindows 11双方の実バージョン/対応を確認する。SMB署名と暗号化は機能が異なる。暗号化された接続ではSMB signingヘッダが省略される場合もあり、暗号化が完全性保護を含む（https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/reduced-performance-after-smb-encryption-signing）。実通信の negotiated dialect と暗号化有無で判断し、署名欄の値だけで安全性を誤判定しない。
 - **宅外**: ルーターでTCP445/NetBIOS 137–139/管理HTTPポートを転送しない。WAN公開、DDNS+SMB直接公開、DMZは不可。将来の宅外アクセスには、明示許可後の WireGuard 等のVPNを別ゲートで検討。家庭内LAN転送だけならVPN/プロキシは必須ではない。UPnP/ルーターの既存設定は読取・影響分析なしに変更しない。
 - Wi-FiはWPA2-AESまたはWPA3を使用、WPSを極力無効化し、家庭内の信頼端末とゲスト/IoT端末を分離する。ゲストWi-Fiに妻PCがつながるとLAN共有不可の場合がある。
 - **公開する範囲**: \`G:\GserverStorage\files\` だけ。専用の非管理者ローカルアカウントにshareとNTFSの必要な権限を付与。Everyone/Guest/匿名の書込みを禁止。親 \`G:\` や他share・一般Usersグループの権限を無造作に削除しない。Gserver WSLの既存書込み・Docker読取りの権限維持を回帰確認する。
@@ -25,3 +25,9 @@ Master Windows 11 の \`G:\GserverStorage\files\` だけを、妻 Windows 10 か
 参考: Microsoft「Windows Server の SMB トラフィックをセキュリティで保護する」 https://learn.microsoft.com/ja-jp/windows-server/storage/file-server/smb-secure-traffic
 Microsoft「SMB セキュリティの強化」 https://learn.microsoft.com/ja-jp/windows-server/storage/file-server/smb-security
 Microsoft「Windows 10 サポート終了」 https://support.microsoft.com/ja-jp/windows/deployment/updates-lifecycle/windows-10-support-has-ended-on-october-14-2025
+
+## 2026-10-28 master PC read-only security audit
+
+Master実測: `scripts/windows_lan_security_readonly.ps1` 実行 `VERIFY=PASS` は監査処理が正常終了した意味であり、安全な共有の合格ではない。観測値: `SMB1_OPTIONAL_FEATURE_STATE=NOT_VERIFIED`、`SMB_SIGNING_REQUIRED_REGISTRY=0`（このPCでは署名の必須を示さない）、`SMB_SIGNING_EFFECTIVE=NOT_VERIFIED`、`SMB_SHARE_ENCRYPTION_EFFECTIVE=NOT_VERIFIED`、`BROAD_WRITE_ACE_COUNT=2`、`ACL_UNRESOLVED_IDENTITY_COUNT=0`、`FIREWALL_445_REMOTE_SCOPE=NOT_VERIFIED`、`ROUTER_WAN_445_FORWARD=NOT_VERIFIED`、`WIFE_PC_SECURITY_PATCH_STATUS=NOT_VERIFIED`、`CHANGES=NONE`。
+
+Broad Write 2件はEveryone/Authenticated Users/Builtin Usersの許可を簡易カウントした値だが、shareとNTFSの実効アクセスや外部公開を証明するものではない。親フォルダーからの継承/ACLの種類を匿名・最小出力で判定する `scripts/windows_lan_acl_detail_readonly.ps1` を追加。本人のWindows user名とファイル名は出力しない。**既存ACLはまだ編集しない。**
