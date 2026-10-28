@@ -21,6 +21,7 @@ app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
 spec = importlib.util.spec_from_file_location("ctl", ROOT / "scripts/gserverctl.py")
 ctl = importlib.util.module_from_spec(spec)
+sys.modules["ctl"] = ctl  # unittest.mock.patch resolves this import name
 spec.loader.exec_module(ctl)
 
 
