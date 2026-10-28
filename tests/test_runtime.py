@@ -332,6 +332,39 @@ class LifecycleTests(unittest.TestCase):
             probe.assert_called_once()
             runner.assert_not_called()
 
+    def test_gateway_config_writer_uses_lock_and_incomplete_marker(self):
+        self.controller.save({"current": self.old})
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "",]), \
+             patch.object(self.controller, "bot_gateway_preflight"), \
+             patch("ctl.subprocess.run", return_value=result) as writer:
+            self.controller.action("bot-gateway-config")
+        script = writer.call_args.args[0][-1]
+        compile(script, "<atomic-gateway-config>", "exec")
+        self.assertIn("gateway_configuration_lock(shared=False)", script)
+        self.assertIn("GATEWAY_CONFIG_INCOMPLETE", script)
+        self.assertIn("os.O_NOFOLLOW", script)
+        self.assertLess(script.index("os.open(marker"), script.index("for label,name"))
+        self.assertLess(script.index("for label,name"), script.index("os.unlink(marker)"))
+        self.assertNotIn("x" * 32, str(writer.call_args.args[0]))
+
+    def test_gateway_worker_never_flushes_with_incomplete_config_marker(self):
+        from contextlib import nullcontext
+        class Once:
+            done = False
+            def is_set(self): return self.done
+            def wait(self, _time): self.done = True
+        with tempfile.TemporaryDirectory() as temp:
+            marker = Path(temp) / "gateway-config-incomplete"
+            marker.write_text("")
+            with patch.object(app, "BOT_SPOOL_DIR", str(Path(temp) / "spool")), \
+                 patch.object(app, "GATEWAY_CONFIG_INCOMPLETE", str(marker)), \
+                 patch.object(app, "gateway_configuration_lock", return_value=nullcontext()), \
+                 patch.object(app, "flush_once") as deliver:
+                app.bot_gateway_worker(Once())
+                deliver.assert_not_called()
+
     def test_gateway_config_saves_only_after_preflight_passes(self):
         self.controller.save({"current": self.old})
         result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")
