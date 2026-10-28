@@ -53,6 +53,25 @@ try {
     }
     Write-Output ('BROAD_WRITE_ACE_COUNT=' + $broadWrite)
     Write-Output ('ACL_UNRESOLVED_IDENTITY_COUNT=' + $unknownAcl)
+    Write-Output ('TARGET_ACL_INHERITANCE_PROTECTED=' + [bool]$acl.AreAccessRulesProtected)
+    # Detail only known built-in wide-access group SIDs; never print local account names.
+    $detailNumber = 0
+    foreach ($entry in $acl.Access) {
+        if ($entry.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        $sid = $null
+        try {
+            $sid = $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+        } catch { continue }
+        if ($sid -in $broadSids -and (([int64]$entry.FileSystemRights -band $writeBits) -ne 0)) {
+            Write-Output ('BROAD_WRITE_ACE_{0}_SID={1}' -f $detailNumber, $sid)
+            Write-Output ('BROAD_WRITE_ACE_{0}_INHERITED={1}' -f $detailNumber, [bool]$entry.IsInherited)
+            Write-Output ('BROAD_WRITE_ACE_{0}_RIGHTS={1}' -f $detailNumber, $entry.FileSystemRights)
+            Write-Output ('BROAD_WRITE_ACE_{0}_INHERIT_FLAGS={1}' -f $detailNumber, $entry.InheritanceFlags)
+            $detailNumber += 1
+        }
+    }
+    Write-Output 'SMB_SIGNING_REQUIREMENT_CHANGE=NOT_PERFORMED'
+    Write-Output 'ACL_CHANGE=NOT_PERFORMED'
     Write-Output 'FIREWALL_445_REMOTE_SCOPE=NOT_VERIFIED'
     Write-Output 'ROUTER_WAN_445_FORWARD=NOT_VERIFIED'
     Write-Output 'WIFE_PC_SECURITY_PATCH_STATUS=NOT_VERIFIED'
