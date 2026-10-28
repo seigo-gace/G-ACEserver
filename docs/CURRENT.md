@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Master最新判断｜妻PC利用・LAN/SMB共有の開発を中止し本来のGserverへ復帰
+
+- **Master明示要件変更:** 「嫁はつかわないので、よけいなことをしなくてもいい」。妻PCからのファイル転送・共有は不要。以後、妻PCのWindows/ESU/ネットワーク検査、SMB3暗号化共有の有効化、妻専用資格情報、TCP445ファイアウォール変更、LAN共有のロールバック機構、ルーター/VPN/プロキシ追加は**現行開発スコープ外**。旧「Exact Next: 妻PCで検査」は**すべて失効**。再開はMasterからの新たな明示依頼がある場合のみ。
+- **現物の保持:** Master Windows11の `G:\\GserverStorage\\files\\LAN-Inbox` は既にローカル作成済だが、SMB共有は未作成。作成済フォルダーを無断削除・改名・再権限変更しない。既存Docker/WSL Gserver、`127.0.0.1:18765`、旧8765、G:/F:原本、Windows Firewallとルーターの設定は保持。妻PCへ検査コマンドを要求しない。
+- **本来の次の実装優先:** `docs/requirements/FINAL_ACCEPTANCE.md` のF01～F08を正本として、G:の認証付きローカル保存 F03 の未完成操作（更新/削除/容量・媒体切断保護）、Web/BotのCLI運用F02、G-ACE Dev KBのCurrent/検索/rollback F04、TGS連携・バックアップ/隔離復元 F05、F06～F08受入を完成させる。妻PC/SMBがF03の受入必須条件であるかのように扱わない。新しい作業・一括自動実行を勝手に開始しない。
+- **証拠区分:** 既存LAN-InboxディレクトリとそのACLは実機PASS、Gserver Docker/API実行は既往PASS。ただしF03総合完了、外部SMB共有、妻PC E2Eはそれぞれ別であり、実施していない部分を完了扱いしない。
+
 ## 2026-10-28 妻PC検査の誤実行が判明｜Master Hostの実機検証として隔離・スクリプトをfail closed
 
 - **Master報告の実測**: 2026-10-28 15:14頃、`windows_wife_lan_readonly.ps1` 新版をPowerShellで実行。Windows `POWERSHELL_PARSE=PASS`、`OS_FAMILY_BY_BUILD=WINDOWS_11_FAMILY`、25H2 / build26200.8894、`MASTER_GSERVER_MARKERS=BOTH_PRESENT`、`HOST_ROLE_HINT=LIKELY_MASTER_GSERVER`、仮想NIC候補2件を除くLAN IPv4候補1件、Private1/Public0、`VERIFY=PASS`。`MASTER_GSERVER_MARKERS=BOTH_PRESENT` により**検査元はGserver Master Hostの可能性が極めて高い**ため、妻Windows10の現況証拠として使用禁止。Masterの個別IPは公開Repoに記載しない。
