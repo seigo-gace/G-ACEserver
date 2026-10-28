@@ -5,6 +5,7 @@ At-least-once HTTP delivery uses stable sourceId/eventId and Gateway 202 receipt
 """
 import hashlib
 import contextlib
+import fcntl
 import hmac
 import json
 import os
@@ -30,6 +31,8 @@ MAX_ATTEMPTS = 20
 MAX_BODY = 4096
 ACCESS_CLIENT_ID_FILE = "/var/lib/gserver/gateway-access-client-id"
 ACCESS_CLIENT_SECRET_FILE = "/var/lib/gserver/gateway-access-client-secret"
+GATEWAY_CONFIG_DIR = "/var/lib/gserver"
+GATEWAY_CONFIG_INCOMPLETE = "/var/lib/gserver/gateway-config-incomplete"
 ALLOWED = {"bot.started", "bot.stopped", "bot.error", "bot.recovered",
            "bot.request.completed", "bot.request.failed", "bot.update.received",
            "bot.delivery.completed", "bot.delivery.failed"}
@@ -223,6 +226,27 @@ def gateway_token(path):
     if not 24 <= len(token) <= 4096 or any(ch <= 32 or ch >= 127 for ch in token):
         raise BotEventError("GATEWAY_TOKEN_INVALID")
     return token.decode("ascii")
+
+
+@contextlib.contextmanager
+def gateway_configuration_lock(directory=GATEWAY_CONFIG_DIR, *, shared=True):
+    """Coordinate the Bot worker and Owner multi-file Gateway configuration."""
+    folder = Path(directory)
+    if not folder.is_dir() or folder.is_symlink():
+        raise BotEventError("GATEWAY_CONFIG_DIRECTORY_UNSAFE")
+    fd = os.open(str(folder / "gateway-config.lock"),
+                 os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise BotEventError("GATEWAY_CONFIG_LOCK_UNSAFE")
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def gateway_access_headers(id_file=None, secret_file=None):
