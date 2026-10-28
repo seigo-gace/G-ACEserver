@@ -53,13 +53,13 @@ try {
     $ok = $true
 } catch {
     Write-Output ('FAILED_PHASE=' + $phase)
-    Write-Output ('ERROR_CODE=' + [string]$_.Exception.Message)
+    Write-Output ('ERROR_CLASS=' + $_.Exception.GetType().Name)
 } finally {
     [Environment]::SetEnvironmentVariable('MCP_ENABLE_FILE_WATCHING',$priorWatch,'Process')
     [Environment]::SetEnvironmentVariable('PYTHONDONTWRITEBYTECODE',$priorPy,'Process')
-    Write-Output 'KB_SOURCE_CONTENTS_INTENTIONALLY_CHANGED=NONE'
+    Write-Output 'KB_CANONICAL_CONTENT_CHANGES=NOT_VERIFIED'
     Write-Output 'GSERVER_DOCKER_CHANGED=False'
-    Write-Output 'VERIFY=' + $(if ($ok) { 'PASS' } else { 'FAIL' })
+    Write-Output ('VERIFY=' + $(if ($ok) { 'PASS' } else { 'FAIL' }))
     Write-Output 'PROJECT_END=Gserver'
     Write-Output '========== GACE_RESULT_END =========='
 }
