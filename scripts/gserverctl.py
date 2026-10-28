@@ -310,6 +310,38 @@ class Controller:
         result = self.run(["exec","gace-gserver-gserver-1","python3","-c",script],capture=True)
         print(result.stdout.rstrip())
 
+    def bot_gateway_preflight(self, payload):
+        """Verify the container-to-private-Gateway TLS/auth path before storing
+        any credentials that would automatically release pending Bot events.
+        The deliberately invalid request must be rejected BEFORE persistence.
+        """
+        probe = (
+            "import json,sys,urllib.error,urllib.request\\n"
+            "sys.path.insert(0,'/opt/gserver/app')\\n"
+            "from tgs_bridge import _NoGatewayRedirect,gateway_endpoint\\n"
+            "value=json.load(sys.stdin)\\n"
+            "req=urllib.request.Request(gateway_endpoint(value['url']),data=b'{}',"
+            "method='POST',headers={'Content-Type':'application/json',"
+            "'Authorization':'Bearer '+value['token']})\\n"
+            "client=urllib.request.build_opener(_NoGatewayRedirect())\\n"
+            "try:\\n"
+            " with client.open(req,timeout=5): pass\\n"
+            "except urllib.error.HTTPError as exc:\\n"
+            " if exc.code!=422: raise RuntimeError('GATEWAY_PREFLIGHT_REJECTED')\\n"
+            " try: answer=json.loads(exc.read(16384))\\n"
+            " except (ValueError,UnicodeError): raise RuntimeError('GATEWAY_PREFLIGHT_INVALID_RESPONSE')\\n"
+            " if not isinstance(answer,dict) or answer.get('error')!='invalid internal event':"
+            " raise RuntimeError('GATEWAY_PREFLIGHT_WRONG_ENDPOINT')\\n"
+            "else: raise RuntimeError('GATEWAY_PREFLIGHT_ACCEPTED_INVALID_EVENT')\\n"
+            "print('GATEWAY_PRIVATE_PREFLIGHT=PASS')\\n"
+        )
+        result = subprocess.run(
+            self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", probe],
+            input=payload, capture_output=True, text=True, timeout=15, check=True)
+        if result.stdout.strip() != "GATEWAY_PRIVATE_PREFLIGHT=PASS":
+            raise ValueError("gateway preflight result not verified")
+        print("GATEWAY_PRIVATE_PREFLIGHT=PASS")
+
     def bot_gateway_config(self):
         # Never pass the private internal API token in CLI args, source or stdout.
         url = input("Gateway HTTPS base URL (/internal/events): ").strip()
@@ -322,6 +354,9 @@ class Controller:
         if not 24 <= len(token) <= 4096 or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
             raise ValueError("invalid Gateway bearer token")
         payload = json.dumps({"url": url, "token": token})
+        # Do not store the settings (or release queued events) until the
+        # actual Gserver container verifies private HTTPS + Gateway auth.
+        self.bot_gateway_preflight(payload)
         script = (
             "import json,os,secrets,sys\n"
             "values=json.load(sys.stdin)\n"
