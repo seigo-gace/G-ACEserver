@@ -76,6 +76,16 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.counts()["blocked"], 1)
         self.assertEqual(self.queue.counts()["sent"], 0)
 
+    def test_blocked_gateway_delivery_requires_explicit_retry(self):
+        self.queue.accept(sample(), now=100)
+        flush_once(self.queue, "https://gateway.example", "token", sender=lambda *_: "blocked")
+        self.assertEqual(self.queue.counts()["blocked"], 1)
+        self.assertEqual(self.queue.retry_blocked(), 1)
+        self.assertEqual(self.queue.counts()["pending"], 1)
+        self.assertEqual(self.queue.counts()["blocked"], 0)
+        sent = flush_once(self.queue, "https://gateway.example", "token", sender=lambda *_: "ack")
+        self.assertEqual(sent["sent"], 1)
+
     def test_wrong_gateway_url_rejected(self):
         for url in ("http://gateway.example", "https://user:pass@gateway.example",
                     "https://gateway.example/unrelated", "file:///etc/passwd"):

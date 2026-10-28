@@ -270,6 +270,16 @@ class Controller:
         self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
         print("GSERVER_BOT_TOKEN=INITIALIZED_PRIVATE_NO_OUTPUT")
 
+    def bot_retry(self):
+        script = (
+            "import sys\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import BotSpool\n"
+            "print('BOT_GATEWAY_RETRY_QUEUED='+str(BotSpool('/var/lib/gserver/bot-spool').retry_blocked(limit=100)))\n"
+        )
+        result = self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
+        print(result.stdout.rstrip())
+
     def bot_status(self):
         script = (
             "import sys,json,os\n"
@@ -341,7 +351,7 @@ class Controller:
             raise ValueError("interrupted operation; run recover first")
         if action == "activate":
             return self.activate(image or "")
-        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-config"):
+        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"):
             release = self.load()
             if not release.get("current"):
                 raise ValueError("Gserver must be activated first")
@@ -351,6 +361,8 @@ class Controller:
                 return self.bot_status()
             if action == "bot-smoke":
                 return self.bot_smoke()
+            if action == "bot-retry":
+                return self.bot_retry()
             return self.bot_gateway_config()
         release = self.load()
         if action == "rollback":
@@ -408,7 +420,7 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-config"])
+    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"])
     parser.add_argument("image", nargs="?")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
