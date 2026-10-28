@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 G:専用Docker readback実機PASS・Host CLIファイル転送Source追加
+
+- **Master PC実機:** Windows PowerShell → WSL `/mnt/g/Project/Gserver/repository` `git pull --ff-only` で `13fff7a...` へ進め、Python `33 tests in 17.054s OK`、`sudo -v`、`python3 scripts/gserverctl.py enable-storage`（既存専用Docker container `gace-gserver-gserver-1` healthy）、`python3 scripts/gserverctl.py storage-list` → `{"entries":[],"next":null}`、`status` → `127.0.0.1:18765->8765/tcp`、末尾 `GSERVER_STORAGE_READ=PASS`。**Windows G:の専用子フォルダーがDockerに読み取り専用接続され、認証済みAPIから一覧を取得できた。** データ未登録のため空一覧は正常。元のG:全体やF:原本への接続ではない。
+- **Source進捗:** 今回は既存GserverのDocker image/Volume/認証/Host 18765はそのまま維持。非破壊のHost WSL CLI `scripts/gserver_files.py` を追加。操作 `put LOCAL_FILE` は実G: mount確認・既存Storageの許可subtree/パス検証・symlink拒否・1MiBチャンクのstream copy・SHA256・fsync・ハードリンクで原子的な**新規保存のみ**・既存ファイルを上書きしない・部分ファイルの通常エラー時削除。`get NAME DIRECTORY` は保存側も新規作成のみ。`list` は既存StorageのAPIと同じ境界を使用する。コードはG:の **`GserverStorage/files` のみ**に保存し、他フォルダー、Docker volume、F:の原本は変更しない。Unit `tests/test_gserver_files.py` にreadback/重複拒否/禁止path/mount切断/途中disk full時のcleanupを追加。
+- **証拠区別:** Source commit `c5777a3e0fdf1c00a5fdcafcb74062096b04bf36`。**Host CLI転送の新unit/実G:転送はまだ未検証**であり、既存の `GSERVER_STORAGE_READ=PASS` を新CLIのPASSに転用しない。Gserver自身のHTTPはまだ読み取り専用であり、別PCからのLAN送信・書込みHTTPアップロード・resume・削除/更新/クォータ/暗号化backup/KB/TGSは未完成。4TB大容量転送の速度・中断回復は未測定。
+- **Exact Next:** 新CLI unitだけを実PCで実行し、G:\\専用ディレクトリへ小さな既存README.mdを1ファイル実保存して、`gserverctl storage-list` で認証付き実読戻し。新image再ビルド不要。これを確認後、より実用的なファイル送受信・Windows内/家内LANからのアクセス・Dev KB/TGS・隔離復元へ継続。定期Codex/別AI・追加管理UIは不要。
+
 ## 2026-10-28 S3 storage test blocker｜稼働中18765ポート競合のテスト誤判定を修正
 
 - **PC実測:** `git pull` で `49c5b11...` へfast-forward後、`python3 -m unittest discover -s tests -p test_runtime.py -q` を実行。`32 tests` のうち `test_local_enable_disable_reuses_image_and_volume`、`test_local_failure_recovers_original_profile`、`test_switch_to_loopback_recreates_container_with_volume_preserved` が `OSError: [Errno 98] Address already in use`（`127.0.0.1:18765`）で失敗。**Gserverは既に18765番で稼働しているので正常な競合**。テストが実host socketをbindする欠陥で、Master/本番Gserver/ストレージ障害ではない。`sudo -v`以降は `&&` 連結で未実行なのでG: storage未接続のまま。既存serviceを止めたり、ポートを変えたりしてテストを通してはいけない。
