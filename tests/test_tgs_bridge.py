@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID,
+from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID, MAX_ATTEMPTS,
                         _NoGatewayRedirect, gateway_endpoint, envelope, flush_once,
                         send_gateway, validate)
 
@@ -223,6 +223,25 @@ class TgsBridgeTests(unittest.TestCase):
         second = self.queue.claim(now=161)
         self.assertEqual(first[1], second[1])
         self.assertEqual(second[2], 2)
+
+    def test_expired_last_attempt_crash_becomes_operator_blocked(self):
+        # A crash after the final claim cannot leave an immortal 'sending'
+        # row or schedule an undocumented attempt 21.
+        self.queue.accept(sample(), now=100)
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            claimed = self.queue.claim(now=100 + (attempt - 1) * 61)
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed[2], attempt)
+
+        last_claim_time = 100 + (MAX_ATTEMPTS - 1) * 61
+        self.assertIsNone(self.queue.claim(now=last_claim_time + 59))
+        self.assertEqual(self.queue.counts()["sending"], 1)
+
+        self.assertIsNone(self.queue.claim(now=last_claim_time + 61))
+        self.assertEqual(self.queue.counts()["sending"], 0)
+        self.assertEqual(self.queue.counts()["blocked"], 1)
+        self.assertEqual(self.queue.retry_blocked(), 1)
+        self.assertEqual(self.queue.counts()["pending"], 1)
 
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
