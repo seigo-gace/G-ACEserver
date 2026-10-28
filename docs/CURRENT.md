@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Windows Firewall 445詳細分類実PC PASS｜広域実効アクセスは未検証
+
+- **Master PC実測:** GitHub `ea07f03...` へfast-forward、`test_windows_lan_probes_contract.py` 3/3 PASS、Windows PowerShell `Parser.ParseFile` `POWERSHELL_PARSE=PASS`。読み取り専用 `scripts/windows_lan_firewall_readonly.ps1` で `FIREWALL_RULES_INSPECTED=811`, `EXPLICIT_TCP445_ALLOW_RULES=3`, `EXPLICIT_TCP445_PRIVATE_ALLOW_RULES=1`, `EXPLICIT_TCP445_PRIVATE_NON_SINGLE_IP_RULES=1`, `EXPLICIT_TCP445_NONPRIVATE_ALLOW_RULES=2`, `EXPLICIT_TCP445_APP_SERVICE_RESTRICTED=3`, `GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=37`, `GENERIC_ANYPORT_OTHER=63`, `UNKNOWN_PORT_SCOPE_RULES=0`, `CHANGES=NONE`, `VERIFY=PASS`。`NOTE=COUNTS_ARE_RULES_NOT_PROOF_OF_SMB_REACHABILITY` の通り、到達性、WAN、wife限定はNOT_VERIFIED。
+- **意味:** TCP445を**明示**するAllowは3件で全件ApplicationName/ServiceName指定あり。Private向け1件はsingle IP指定でない。Generic anyport（アプリ/サービス限定37件、限定のない63件）は具体的な端末、LocalAddress、RemoteAddress、profile、Interfaceの実効条件をまだ含めていないため、63件全てがTCP445通信を通すと断定してはいけない。逆に、**63件の広い可能性**を残したまま「新規妻PC専用Firewall ruleを追加すれば妻だけアクセス可能」と断定してもいけない。Windows Defender規則811件を無断で停止/変更しない。
+- **ゲート:** 新LAN-Inboxフォルダーの独立ACLはPC実機PASS、SMB network shareは未作成。今後はGeneric 63件が現Privateで実質許可候補かを**集計だけで追加絞込**し、妻Windows10の実ビルド/ESU/LAN IPv4と、Router WAN445非転送を確認。安全を満たす共有・アカウント・Firewall・取り消しをセットで実装するまで、SMB共有は公開しない。Gserver Docker127.0.0.1:18765/既存G:保存とACLは変更しない。
+
 ## 2026-10-28 Firewall 445監査実測PASS｜103件はSMB直接許可と同義でないためSource分類修正
 
 - **Master PC実機:** `git pull --ff-only` で `9ee6f4d...` fast-forward、Python `test_windows_lan_probes_contract.py` **3/3 PASS**、Windows `System.Management.Automation.Language.Parser.ParseFile` **POWERSHELL_PARSE=PASS**。既存 `scripts/windows_lan_firewall_readonly.ps1` は `WINDOWS_FIREWALL_COM` → `FIREWALL_RULES_INSPECTED=811`、`ACTIVE_INBOUND_TCP445_ALLOW_RULES=103`、`BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES=84`、`NONPRIVATE_TCP445_ALLOW_RULES=97`、`UNREADABLE_ALLOW_RULE_PORT_SCOPES=0`、`CHANGES=NONE`、`VERIFY=PASS`。**監査ツールの実行は成功したが、Firewall経由のSMB到達性自体はNOT_VERIFIED**。LAN-Inbox/既存Docker/README/G:原本への変更はない。
