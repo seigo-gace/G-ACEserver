@@ -240,6 +240,48 @@ class LifecycleTests(unittest.TestCase):
                 self.controller.action("bot-gateway-config")
             runner.assert_not_called()
 
+    def test_gateway_preflight_executes_only_negative_validation_probe(self):
+        payload = json.dumps({"url": "https://private.example", "token": "x" * 32})
+        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_PREFLIGHT=PASS\\n")
+        with patch("ctl.subprocess.run", return_value=completed) as runner:
+            self.controller.bot_gateway_preflight(payload)
+        self.assertEqual(runner.call_count, 1)
+        arguments = runner.call_args.args[0]
+        self.assertEqual(arguments[-2], "-c")
+        probe = arguments[-1]
+        compile(probe, "<gateway-negative-auth-preflight>", "exec")
+        self.assertIn("data=b'{}'", probe)
+        self.assertIn("answer.get('error')!='invalid internal event'", probe)
+        self.assertIn("_NoGatewayRedirect", probe)
+        self.assertNotIn("x" * 32, str(arguments))
+        self.assertEqual(runner.call_args.kwargs["input"], payload)
+
+    def test_gateway_config_preflight_failure_never_saves_or_sends_queue(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \\
+             patch("ctl.getpass.getpass", return_value="x" * 32), \\
+             patch.object(self.controller, "bot_gateway_preflight",
+                          side_effect=ValueError("private gateway unavailable")) as probe, \\
+             patch("ctl.subprocess.run") as runner:
+            with self.assertRaises(ValueError):
+                self.controller.action("bot-gateway-config")
+            probe.assert_called_once()
+            runner.assert_not_called()
+
+    def test_gateway_config_saves_only_after_preflight_passes(self):
+        self.controller.save({"current": self.old})
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\\n")
+        with patch("builtins.input", return_value="https://private.example"), \\
+             patch("ctl.getpass.getpass", return_value="x" * 32), \\
+             patch.object(self.controller, "bot_gateway_preflight") as probe, \\
+             patch("ctl.subprocess.run", return_value=result) as writer:
+            self.controller.action("bot-gateway-config")
+        probe.assert_called_once()
+        writer.assert_called_once()
+        self.assertNotIn("x" * 32, str(writer.call_args.args[0]))
+        self.assertEqual(json.loads(writer.call_args.kwargs["input"])["url"],
+                         "https://private.example")
+
     def test_update_and_rollback_persist_immutable_versions(self):
         self.controller.save({'current': self.old})
         with patch.object(self.controller, 'run'):
