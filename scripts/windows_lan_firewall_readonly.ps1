@@ -1,71 +1,88 @@
-# Read-only, bounded audit of inbound TCP445 allow rules on Master Windows.
-# Does not change firewall, shares, accounts, network profiles or permissions.
+# Scoped read-only TCP445 Windows Firewall audit. Does not infer effective access.
+# No modifications to firewall, shares, accounts, drives, router or Docker.
 $ErrorActionPreference = 'Stop'
 $phase = 'START'
 $ok = $false
 Write-Output '========== GACE_RESULT_BEGIN =========='
 Write-Output 'PROJECT=Gserver'
-Write-Output 'ACTION=LAN_HOST_FIREWALL_445_READ_ONLY'
+Write-Output 'ACTION=LAN_HOST_FIREWALL_445_SCOPED_READ_ONLY'
 try {
-    $phase = 'WINDOWS_FIREWALL_COM'
+    $phase = 'FIREWALL_COM_RULES'
     Write-Output ('PHASE=' + $phase)
     $policy = New-Object -ComObject HNetCfg.FwPolicy2
     $seen = 0
-    $tcpAllows = 0
-    $broadPrivate = 0
-    $nonPrivate = 0
-    $unknownPorts = 0
+    $explicit445 = 0
+    $explicitPrivate = 0
+    $explicitPrivateBroad = 0
+    $explicitNonprivate = 0
+    $explicitRestrictedAppService = 0
+    $anyPortGeneric = 0
+    $anyPortAppService = 0
+    $unknownPortScope = 0
     foreach ($rule in $policy.Rules) {
         $seen++
-        if ($seen -gt 4000) { throw 'Firewall rule scan limit exceeded' }
+        if ($seen -gt 4000) { throw 'Firewall audit safety limit exceeded' }
         if (-not $rule.Enabled) { continue }
         if ([int]$rule.Direction -ne 1 -or [int]$rule.Action -ne 1) { continue }
-        if ([int]$rule.Protocol -ne 6 -and [int]$rule.Protocol -ne 256) { continue }
+        $protocol = [int]$rule.Protocol
+        if ($protocol -ne 6 -and $protocol -ne 256) { continue }
 
-        # Count only rules that can allow TCP/445. Unreadable port scope is unknown.
-        $portText = ''
-        try {
-            $portText = [string]$rule.LocalPorts
-        } catch {
-            $unknownPorts++
+        $ports = ''
+        try { $ports = [string]$rule.LocalPorts }
+        catch {
+            $unknownPortScope++
             continue
         }
-        $is445 = [string]::IsNullOrWhiteSpace($portText) -or $portText.Trim() -eq '*'
-        if (-not $is445) {
-            foreach ($item in $portText.Split(',')) {
-                $item = $item.Trim()
-                if ($item -eq '445') {
-                    $is445 = $true
-                    break
-                }
-                if ($item -match '^[0-9]+-[0-9]+$') {
-                    $bounds = $item.Split('-')
+        $isAnyPort = [string]::IsNullOrWhiteSpace($ports) -or $ports.Trim() -eq '*'
+        $has445 = $false
+        if (-not $isAnyPort) {
+            foreach ($item in $ports.Split(',')) {
+                $value = $item.Trim()
+                if ($value -eq '445') { $has445 = $true; break }
+                if ($value -match '^[0-9]+-[0-9]+$') {
+                    $bounds = $value.Split('-')
                     if ([int]$bounds[0] -le 445 -and [int]$bounds[1] -ge 445) {
-                        $is445 = $true
+                        $has445 = $true
                         break
                     }
                 }
             }
         }
-        if (-not $is445) { continue }
-        $tcpAllows++
 
-        # A single IPv4 address is narrow; wildcard, subnet and aliases are not.
-        $scope = [string]$rule.RemoteAddresses
-        $singleIPv4 = $scope -match '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
+        $app = [string]$rule.ApplicationName
+        $service = [string]$rule.ServiceName
+        $restricted = (-not [string]::IsNullOrWhiteSpace($app) -and $app -ne '*') -or
+            (-not [string]::IsNullOrWhiteSpace($service) -and $service -ne '*')
+        if ($isAnyPort -or $protocol -eq 256) {
+            # Generic rules cannot be counted as explicit SMB permissions.
+            if ($restricted) { $anyPortAppService++ } else { $anyPortGeneric++ }
+            continue
+        }
+        if (-not $has445) { continue }
+        $explicit445++
+        if ($restricted) { $explicitRestrictedAppService++ }
+
         $profiles = [int]$rule.Profiles
-        if (-not $singleIPv4 -and (($profiles -band 2) -ne 0 -or $profiles -eq 2147483647)) {
-            $broadPrivate++
+        $private = (($profiles -band 2) -ne 0) -or $profiles -eq 2147483647 -or $profiles -eq -1
+        $nonprivate = (($profiles -band 5) -ne 0) -or $profiles -eq 2147483647 -or $profiles -eq -1
+        if ($private) {
+            $explicitPrivate++
+            $scope = [string]$rule.RemoteAddresses
+            $oneIPv4 = $scope -match '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
+            if (-not $oneIPv4) { $explicitPrivateBroad++ }
         }
-        if (($profiles -band 5) -ne 0 -or $profiles -eq 2147483647) {
-            $nonPrivate++
-        }
+        if ($nonprivate) { $explicitNonprivate++ }
     }
     Write-Output ('FIREWALL_RULES_INSPECTED=' + $seen)
-    Write-Output ('ACTIVE_INBOUND_TCP445_ALLOW_RULES=' + $tcpAllows)
-    Write-Output ('BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES=' + $broadPrivate)
-    Write-Output ('NONPRIVATE_TCP445_ALLOW_RULES=' + $nonPrivate)
-    Write-Output ('UNREADABLE_ALLOW_RULE_PORT_SCOPES=' + $unknownPorts)
+    Write-Output ('EXPLICIT_TCP445_ALLOW_RULES=' + $explicit445)
+    Write-Output ('EXPLICIT_TCP445_PRIVATE_ALLOW_RULES=' + $explicitPrivate)
+    Write-Output ('EXPLICIT_TCP445_PRIVATE_NON_SINGLE_IP_RULES=' + $explicitPrivateBroad)
+    Write-Output ('EXPLICIT_TCP445_NONPRIVATE_ALLOW_RULES=' + $explicitNonprivate)
+    Write-Output ('EXPLICIT_TCP445_APP_SERVICE_RESTRICTED=' + $explicitRestrictedAppService)
+    Write-Output ('GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=' + $anyPortAppService)
+    Write-Output ('GENERIC_ANYPORT_OTHER=' + $anyPortGeneric)
+    Write-Output ('UNKNOWN_PORT_SCOPE_RULES=' + $unknownPortScope)
+    Write-Output 'NOTE=COUNTS_ARE_RULES_NOT_PROOF_OF_SMB_REACHABILITY'
     Write-Output 'FIREWALL_445_EFFECTIVE_ACCESS=NOT_VERIFIED'
     Write-Output 'WIFE_PC_IPV4=NOT_VERIFIED'
     Write-Output 'ROUTER_WAN_FORWARD=NOT_VERIFIED'
