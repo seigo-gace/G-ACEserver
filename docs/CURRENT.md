@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F04 Master実PCでF:接続とCurrent ACTIVE実証｜次はファイル実SHA・既存Projection
+
+- **Master実測:** Windows `F:\\G-ACE-KB` は存在。Gserver checkout `386ab68` にfast-forward、`test_wsl_mount_kb_f_readonly.py` **5/5 PASS**。`scripts/wsl_mount_kb_f_readonly.py` が `mount -t drvfs -o ro F: /mnt/f` を明示一度だけ実施、`F_WSL_MOUNT=MOUNTED_READ_ONLY_VERIFIED` `KB_F_ROOT_VISIBLE=True` `F_WINDOWS_CONTENTS_CHANGED=NONE` `VERIFY=PASS`。続くWSL `gace` 利用者の `scripts/gserver_kb_mount_probe.py` は `F_KB_MOUNT_STATE=F_KB_ROOT_READABLE` `F_MOUNT_FILESYSTEM=9p` `KB_REPO_PRESENT=True` `KB_FORMAL_PRESENT=True` `KB_ACTIVE_MARKER_PRESENT=True` `KB_SEARCH_RECORDS_PRESENT=True` `F_SOURCE_MODIFIED=NONE` `VERIFY=PASS`。F:はGserverから**読み取り専用で参照できる状態になった**。
+- **ACTIVE Current実測:** `scripts/gserver_kb.py` `VERIFY=PASS` `KB_CURRENT=ACTIVE_AUTHORITY_CONSISTENT` `KB_CATALOG_COMMIT=68e7d643d0e6931e646fd8895d189fb4e1ee337d` `KB_TOTALFORMALRECORDCOUNT=814` `KB_KNOWLEDGEUNITCOUNT=720` `KB_CASECOUNT=160` `KB_RELATIONSHIPCOUNT=720` `EXISTING_WINDOWS_MVS_PRESENT=True`。marker/state/receiptのACTIVE・commit・hash申告・件数整合はPASS。**宣言される件数であり、全実ファイル/索引/MCPの実行証明ではない**。
+- **残未検証:** `KB_EXISTING_RUNTIME_PROJECTION=NOT_VERIFIED` `KB_SEARCH_E2E=NOT_VERIFIED` `KB_CURRENT_CUTOVER=NOT_PERFORMED`。次は既存のF:ファイル6つの実SHA検査と、既存Dev KB `verify_modulecatalog_runtime_projection.py` を利用した720件Markdownの byte-exact 検査。既存Windows MVSプロセスやMCP検索は、その後の実行環境確認とする。ユーザーからリアルで渡されたログ以外をPASSと誤認しない。
+- **安全:** F:/G:既存データ・Windows設定・SMB・Firewall・Docker/Compose・Current切替は変更していない。WSL /mnt/f の一時 read-only mountのみ変更した。妻PCは開発対象外。F04は部分E2E PASS、製品全体F01-F08は未完成。
+ 
 ## 2026-10-28 Windows F:は存在、WSL /mnt/fは不在｜明示的なread-only DrvFs受入を実装
 
 - **実測 (Master):** Windows PowerShell `WINDOWS_F_DRIVE_PRESENT=True` / `WINDOWS_F_KB_ROOT_PRESENT=True`。Gserver main `2037812` をpull、`test_gserver_kb_mount_probe.py` 8/8 PASS、`test_runtime.py` 36/36 PASS。Gserver診断 `F_KB_MOUNT_STATE=WSL_F_PATH_MISSING`、`F_SOURCE_MODIFIED=NONE`、`VERIFY=PASS`。そのため `KB_CURRENT_INSPECTION=SKIPPED_F_MOUNT_NOT_READY`。**Windows原本とディスクは存在。WSLにF:接続が欠けているだけ。** 既存Dev KB Current/MVS/ModuleCatalogはまだ実測していない。
