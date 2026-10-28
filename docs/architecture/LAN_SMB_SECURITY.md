@@ -1,0 +1,27 @@
+# 家庭用回線 / Gserver のLANファイル共有セキュリティゲート
+
+## 目的と承認境界
+Master Windows 11 の \`G:\GserverStorage\files\` だけを、妻 Windows 10 から同じ宅内LANで動画転送できるようにする。既存Docker Gserver \`127.0.0.1:18765\` と旧8765、G:/F:の既存原本、GitHub開発面には手を加えない。本書の設計・read-only監査は**共有の公開許可や設定変更ではない**。個々の作業は実Hostで現在値を確認し、既存への影響・即時ロールバックを満たすまで停止する。
+
+## 脅威と通信方式
+- 自宅回線でも、マルウェア感染端末・古いWindows・偽のWi-Fi接続・ルーター設定不備・共有資格情報の漏えいが脅威。回線種別が家庭用であることは暗号化やアクセス制限の代替ではない。
+- **同一宅内**: 別のHTTPプロキシ/リバースプロキシを立てず Windows標準 SMB 3.x (SMB2/3 family) を利用。必要なら共有単位でSMB encryption（\`New-SmbShare -EncryptData $true\`）を有効化し、SMB signingを要求。SMB1とゲスト/匿名ログオンは使用せず、有効化しない。SMB署名・暗号化の実有効性は接続成功時に readback。クライアントWindows 10とWindows 11双方の実バージョン/対応を確認する。SMB署名と暗号化は機能が異なる。
+- **宅外**: ルーターでTCP445/NetBIOS 137–139/管理HTTPポートを転送しない。WAN公開、DDNS+SMB直接公開、DMZは不可。将来の宅外アクセスには、明示許可後の WireGuard 等のVPNを別ゲートで検討。家庭内LAN転送だけならVPN/プロキシは必須ではない。UPnP/ルーターの既存設定は読取・影響分析なしに変更しない。
+- Wi-FiはWPA2-AESまたはWPA3を使用、WPSを極力無効化し、家庭内の信頼端末とゲスト/IoT端末を分離する。ゲストWi-Fiに妻PCがつながるとLAN共有不可の場合がある。
+- **公開する範囲**: \`G:\GserverStorage\files\` だけ。専用の非管理者ローカルアカウントにshareとNTFSの必要な権限を付与。Everyone/Guest/匿名の書込みを禁止。親 \`G:\` や他share・一般Usersグループの権限を無造作に削除しない。Gserver WSLの既存書込み・Docker読取りの権限維持を回帰確認する。
+- Windows Defender Firewallは Private profile の**妻PCの確認済みLANアドレス**だけからTCP445受信許可。IPがDHCPで変化する場合はルーターDHCP予約を検討し、未確認サブネット全体への拡大は避ける。Public/Domain profile、WANからの受信許可や全ルール一括有効化は禁止。
+- **妻PC更新**: 一般Windows 10は2025-10-14通常サポート終了。2026-10-28時点のMicrosoft案内では、対象Windows10でConsumer ESU登録により2027-10-12までの保護が可能。実PCでエディション、更新適用とESU加入状態を確認する。未保護/古いOSからの書込み共有開始はゲート保留。Windows11へ移行できるなら優先。
+- 4TB級転送は回線帯域よりWi-Fi品質、HDD書込み、CPU暗号化負荷の影響が大きい。初回小容量ファイル→内容SHA256照合→数GB→中断再開/空き容量/実測速度へ段階的に進める。大量ファイル一括コピーはコピー元を削除せず、転送中断時の途中ファイルを「完了」と扱わない。バックアップ/復元がない状態で移動（切り取り）を推奨しない。
+
+## 共有設定前の必須ゲート
+1. **Master PC**: 既存Private profile/SMB service/445 listen/共有名空きは実機PASS。ただしSMB1機能の状態・署名の必須化・SMB暗号化対応・既存NTFSの広範Write ACE・Firewallルール適用範囲は未検証。registry \`SMB1/SMB2=UNSET\` は機能状態の確認ではない。
+2. **妻PC**: 同じ信頼できるLANに接続し、Windows10 build/更新とESU有効性・IP・SMB2/3対応・他のネットワークプロファイルをread-onlyで確認。本人が貼るログはローカルIP/ユーザー名/資格情報を不要に含めない。
+3. **共有有効化**: 管理者権限での新規専用User作成/強固なパスワード生成は秘密をチャットやGitHubに書かずHostに保存。固有の \`GserverTransfer\` 共有を \`EncryptData\` と専用Principal限定で作成。NTFS ACLとFirewallの追加部分のみを事前記録し、元の設定に戻す操作を同時に用意する。リモート範囲未確認なら共有を有効化しない。Windows Defender・既存共有/サーバープロセスは止めない。
+4. **受入**: 妻PCで資格情報によるアクセス、実 negotiated SMB dialect / signing / encryption、コピー・内容SHA256・再読戻し、権限外・匿名拒否、非許可LANから接続不可、Gserver Docker/WSL既存保存機能正常を実測。Windows再起動後の動作を別途確認。
+
+## 構築前と構築後の区別
+現在 **SMB共有は未作成 / 家庭内転送はNOT_VERIFIED**。TCP445 listenerが存在しても、FirewallによるLAN到達許可やWAN閉鎖の証拠ではない。独自リバースプロキシ/Docker SMB gateway/VPNを今すぐ新設する根拠もない。
+
+参考: Microsoft「Windows Server の SMB トラフィックをセキュリティで保護する」 https://learn.microsoft.com/ja-jp/windows-server/storage/file-server/smb-secure-traffic
+Microsoft「SMB セキュリティの強化」 https://learn.microsoft.com/ja-jp/windows-server/storage/file-server/smb-security
+Microsoft「Windows 10 サポート終了」 https://support.microsoft.com/ja-jp/windows/deployment/updates-lifecycle/windows-10-support-has-ended-on-october-14-2025
