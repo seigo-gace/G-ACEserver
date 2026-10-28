@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from kb_source import inspect, verify_existing_projection, KBSourceError, F_ROOT
+from kb_source import inspect, verify_existing_projection, verify_existing_counts, KBSourceError, F_ROOT
 
 
 def main():
@@ -16,12 +16,14 @@ def main():
                    help="Stream and verify six authoritative files; no indexing")
     p.add_argument("--verify-projection", action="store_true",
                    help="Run the existing read-only F: Dev KB byte-exact Current verifier")
+    p.add_argument("--verify-counts", action="store_true",
+                   help="Independently count actual JSONL record lines against ACTIVE authority")
     args = p.parse_args()
     print("========== GACE_RESULT_BEGIN ==========")
     print("PROJECT=Gserver")
     print("ACTION=DEV_KB_CURRENT_READ_ONLY")
     try:
-        result = inspect(args.root, verify_hashes=(args.verify_hashes or args.verify_projection))
+        result = inspect(args.root, verify_hashes=(args.verify_hashes or args.verify_projection or args.verify_counts))
         print("KB_CURRENT=" + result["current"])
         print("HISTORICAL_FORMAL_PRESENT=" + str(result["historical_formal_corpus_present"]))
         print("KB_SOURCE_PRESENT=" + str(result["existing_kb_source_present"]))
@@ -31,6 +33,13 @@ def main():
             print("KB_CATALOG_COMMIT=" + result["catalog_commit"])
             for key, value in sorted(result["counts"].items()):
                 print("KB_" + key.upper() + "=" + str(value))
+        if args.verify_counts:
+            verified_counts = verify_existing_counts(args.root, result)
+            print("KB_JSONL_CARDINALITIES=PASS")
+            for key, value in sorted(verified_counts["counts"].items()):
+                print("KB_ACTUAL_" + key.upper() + "=" + str(value))
+        else:
+            print("KB_JSONL_CARDINALITIES=NOT_VERIFIED")
         if args.verify_projection:
             projection = verify_existing_projection(args.root, result)
             print("KB_EXISTING_RUNTIME_PROJECTION=" + projection["projection"])
