@@ -347,7 +347,7 @@ class Controller:
             raise ValueError("gateway preflight result not verified")
         print("GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS")
 
-    def bot_gateway_config(self):
+    def gateway_auth_inputs(self):
         # Never pass the private internal API token in CLI args, source or stdout.
         url = input("Gateway HTTPS base URL (/internal/events): ").strip()
         parsed = urllib.parse.urlsplit(url)
@@ -364,8 +364,11 @@ class Controller:
             if (not 8 <= len(access_id) <= 255 or not 8 <= len(access_secret) <= 4096 or
                     any(ord(c) < 33 or ord(c) > 126 for c in access_id + access_secret)):
                 raise ValueError("invalid Cloudflare Access service credentials")
-        payload = json.dumps({"url": url, "token": token,
-                              "access_id": access_id, "access_secret": access_secret})
+        return json.dumps({"url": url, "token": token,
+                           "access_id": access_id, "access_secret": access_secret})
+
+    def bot_gateway_config(self):
+        payload = self.gateway_auth_inputs()
         # Do not store the settings (or release queued events) until the
         # actual Gserver container verifies private HTTPS + Gateway auth.
         self.bot_gateway_preflight(payload)
@@ -393,6 +396,41 @@ class Controller:
             input=payload, capture_output=True, text=True, timeout=30, check=True)
         print(result.stdout.rstrip())
 
+    def bot_gateway_canary(self):
+        """One Gateway canary; never store settings or claim the live Bot spool."""
+        payload = self.gateway_auth_inputs()
+        self.bot_gateway_preflight(payload)
+        probe = (
+            "import json,sys,uuid\n"
+            "from datetime import datetime,timezone\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import envelope,validate,send_gateway\n"
+            "value=json.load(sys.stdin)\n"
+            "headers={}\n"
+            "if value.get('access_id'):\n"
+            " headers['CF-Access-Client-Id']=value['access_id']\n"
+            " headers['CF-Access-Client-Secret']=value['access_secret']\n"
+            "event={'bot':'gserver-probe','event_id':'probe-'+uuid.uuid4().hex,\n"
+            "       'event':'bot.started','level':'info','outcome':'PASS'}\n"
+            "data=envelope(validate(event),occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'))\n"
+            "print('PRODUCER_EVENT_ID='+data['eventId'],flush=True)\n"
+            "outcome=send_gateway(data,value['url'],value['token'],access_headers_override=headers)\n"
+            "if outcome!='ack': sys.exit(11)\n"
+            "print('GATEWAY_CANARY_202=PASS')\n"
+        )
+        result = subprocess.run(
+            self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", probe],
+            input=payload, capture_output=True, text=True, timeout=20)
+        output = result.stdout.strip().splitlines()
+        # Print only a known public correlation key, never raw subprocess output.
+        if not output or not re.fullmatch(
+                r"PRODUCER_EVENT_ID=gserver:gserver-probe:probe-[a-f0-9]{32}", output[0]):
+            raise ValueError("gateway canary correlation missing")
+        print(output[0])
+        if result.returncode != 0 or output[-1] != "GATEWAY_CANARY_202=PASS":
+            raise ValueError("gateway canary not confirmed")
+        print("GATEWAY_CANARY_202=PASS")
+
     def action(self, action, image=None):
         if action == "recover":
             return self.recover()
@@ -400,7 +438,7 @@ class Controller:
             raise ValueError("interrupted operation; run recover first")
         if action == "activate":
             return self.activate(image or "")
-        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"):
+        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-canary", "bot-gateway-config", "bot-retry"):
             release = self.load()
             if not release.get("current"):
                 raise ValueError("Gserver must be activated first")
@@ -412,6 +450,8 @@ class Controller:
                 return self.bot_smoke()
             if action == "bot-retry":
                 return self.bot_retry()
+            if action == "bot-gateway-canary":
+                return self.bot_gateway_canary()
             return self.bot_gateway_config()
         release = self.load()
         if action == "rollback":
@@ -469,7 +509,7 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"])
+    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-canary", "bot-gateway-config", "bot-retry"])
     parser.add_argument("image", nargs="?")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
