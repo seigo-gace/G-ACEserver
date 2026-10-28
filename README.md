@@ -1,10 +1,14 @@
 # G-ACEserver
 
-> **Status: S2_SOURCE_IMPLEMENTED / CONTAINER_RUNTIME_NOT_VERIFIED**
+> **Status: BOT/TGS SOURCE_IMPLEMENTED / GSERVER_BOT_DOCKER_E2E_PENDING**
 
 The existing Python prototype is now imported and packaged with an immutable-base Dockerfile, persistent bounded logs, an authenticated status UI/API, and offline Compose lifecycle/rollback tooling. See [current evidence](docs/CURRENT.md) and [runtime operation boundary](docs/architecture/RUNTIME_S2.md). The base deployment exposes no host ports and mounts no original data. Container execution is pending local sudo authentication; this is not final production acceptance.
 
 Gserver is a Docker/Compose-first self-hosted service platform on the owner's Windows PC / WSL Ubuntu, designed to share an operational contract with existing Contabo Docker hosts and future additional servers. Its goal is one resource-efficient, extensible pseudo-cloud of web applications, independent services, storage, the existing G-ACE Development Knowledge Base, and TGserver (TGS) logging/backup integrations. The source design is adopted; Gserver Docker runtime is NOT deployed or verified.
+
+## Immediate priority — Telegram Bot-ready Gserver
+
+Implement the Bot local runtime and existing TGserver ZERO connection first; Dev KB is postponed by the owner. See [Bot-to-TGserver contract](docs/architecture/BOT_TGS_BRIDGE.md), [safe one-shot Bot-ready installation](scripts/gserver_bot_ready.py), and [Current](docs/CURRENT.md). Telegram live delivery is NOT VERIFIED despite TGserver source registry CI PASS.
 
 ## Start here
 

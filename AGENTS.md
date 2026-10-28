@@ -3,6 +3,10 @@
 
 > **2026-10-28 Master最新変更:** 本人だけがVS Code/CursorからWSLを管理。**管理用Web UIの追加開発/受入は不要**（Web/APIは必要な機能のみ）。D:\WSL\UbuntuへWSL本体は既存移設済み。C:容量保護とD: HDDの速度劣化に注意し、Docker Engine 29の`/var/lib/docker`/`/var/lib/containerd`とC/D実使用をread-only確認、不要な二重依存・image/cache増殖を抑制。前の「管理UI必須」指示より今回のMaster意思を優先。詳細は[完成条件](docs/requirements/FINAL_ACCEPTANCE.md)。
 
+## Master最新優先（2026-10-28）
+
+KB作業を保留し、GserverのTelegram Bot用ローカル受付・Gserver Docker実機稼働・既存Webhook Gateway→TGserver ZERO連携の実E2Eを優先する。docs/architecture/BOT_TGS_BRIDGE.md参照。Gserver専用P015はTGserver source registry上CI PASSだが本番Topic・配送は別確認。妻PC/SMB/管理UIの作業を持ち込まない。勝手な有料AI/定期タスクは禁止。
+
 ## 読込順
 1. [README.md](README.md) → [docs/CURRENT.md](docs/CURRENT.md) → 今回の GitHub Issue／[46タスク](docs/tasks/S0.md)
 2. [G-ACE server-core Manifest](https://github.com/G-ACE-inc/server-core/blob/main/operations/github-project-rule-plane.json) → [SERVER_AI #16](https://github.com/G-ACE-inc/server-core/issues/16) → アクセスできる場合のみGitHub Project #1 のGserver Current
