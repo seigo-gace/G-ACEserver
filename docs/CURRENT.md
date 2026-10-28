@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Firewall監査ScriptのPowerShell ParserError｜破損source全体の置換と再発防止
+
+- **Master PC実測:** `git pull --ff-only origin main` で `83e1abe...` へ更新。Python `tests/test_windows_lan_probes_contract.py` = **2/2 PASS**。その後 `powershell.exe ... windows_lan_firewall_readonly.ps1` がWindows PowerShell構文解析時に `ParserError`。55行目 `Unexpected token FIREWALL_RULES_INSPECTED`、100行目 `string missing terminator`、閉じ `}` 不足等。**監査コードは実行されず**、Firewall/SMB共有/ACLの設定変更は発生しない。DockerとG:実保存、LAN-Inbox作成の実機PASSは維持。
+- **GitHubの破損Source直接検査:** `scripts/windows_lan_firewall_readonly.ps1` は `$singleIPv4 = $scope -match ...` の正規表現途中で行が途切れ、`if (-not $ok)...` の後に余計な `if (-not $singleIPv4)` 以下の末尾コードが重複付加されていた。先のSource編集で文字列置換に `$'` を含むパターンをそのまま使用した際の特殊置換解釈が原因候補で、**本質は不正なSourceをAST検証せず送った実装・検証漏れ**。
+- **修正:** Sourceを継ぎはぎせず1つの完成PowerShellとして再生成し、各 `GACE_RESULT` marker 1回、回帰test `tests/test_windows_lan_probes_contract.py` に正規表現閉じ/重複脚部/単一ヘッダ・フッタ検出を追加。Code changes `bce467d59ec51b542b18568ec9285f073526aeda` / `107e80c71a905f8cf75e40cc8580da03ee97c0a4`。GitHub readbackでは1つの完成sourceであり、**Windows実AST parseおよび監査動作は未実行**。Host COM auditは既存Firewall許可ルールのread-only bounded列挙に限る。
+- **Exact Next:** GitHub pull後、修正したunit（3 test想定）→実Windows PowerShell `System.Management.Automation.Language.Parser.ParseFile` で **Parse errors 0** を必須条件にし、その時だけread-only Firewall監査を実行。ParserErrorなら本体を動かさずsource差分だけ修正し、何度も手元のWindowsネットワークやDocker環境を変更しない。Firewall 445の許可範囲が特定できるまではwife PCの未確認IPに対する共有を開かない。
+
 ## 2026-10-28 LAN-Inbox作成・ACL隔離実PC PASS｜次の2PC間ネットワークゲート
 
 - **Master PC実測:** GitHub `8ae85ac...` fast-forward、`tests/test_windows_lan_inbox_contract.py` Python **2/2 PASS**。Windows `scripts/windows_lan_inbox.ps1 -Prepare` で `SAFE_PARENT`→`TARGET_COLLISION`→`CREATE_EMPTY_INBOX`→`SET_CHILD_ACL`→`READBACK`、`INBOX_STATE=CREATED`、`INBOX_INHERITANCE_PROTECTED=True`、`INBOX_BROAD_ALLOW_COUNT=0`、`G_PARENT_ACL_CHANGED=False`、`SHARE_CREATED=False`、`FIREWALL_CHANGED=False`、`VERIFY=PASS`。**`G:\\GserverStorage\\files\\LAN-Inbox` は実機作成・ACL個別保護PASS**。Dockerの認証付き一覧への反映、妻PCからの転送、復元はこれだけでは未実証。
