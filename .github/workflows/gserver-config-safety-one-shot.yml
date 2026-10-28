@@ -1,0 +1,19 @@
+name: Gserver config safety one-shot checks
+on:
+  push:
+    branches:
+      - chat/gserver-access-service-token-20261029
+permissions:
+  contents: read
+jobs:
+  gateway-config-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python source and regression tests
+        run: python3 -m py_compile app/tgs_bridge.py app/gserver.py scripts/gserverctl.py tests/test_tgs_bridge.py tests/test_runtime.py
+      - name: Run focused Gserver Bot transport and runtime suite
+        run: |
+          python3 -m unittest discover -s tests -p 'test_tgs_bridge.py' -v
+          python3 -m unittest discover -s tests -p 'test_runtime.py' -v
