@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 Firewall 445監査実測PASS｜103件はSMB直接許可と同義でないためSource分類修正
+
+- **Master PC実機:** `git pull --ff-only` で `9ee6f4d...` fast-forward、Python `test_windows_lan_probes_contract.py` **3/3 PASS**、Windows `System.Management.Automation.Language.Parser.ParseFile` **POWERSHELL_PARSE=PASS**。既存 `scripts/windows_lan_firewall_readonly.ps1` は `WINDOWS_FIREWALL_COM` → `FIREWALL_RULES_INSPECTED=811`、`ACTIVE_INBOUND_TCP445_ALLOW_RULES=103`、`BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES=84`、`NONPRIVATE_TCP445_ALLOW_RULES=97`、`UNREADABLE_ALLOW_RULE_PORT_SCOPES=0`、`CHANGES=NONE`、`VERIFY=PASS`。**監査ツールの実行は成功したが、Firewall経由のSMB到達性自体はNOT_VERIFIED**。LAN-Inbox/既存Docker/README/G:原本への変更はない。
+- **重要な集計誤解の修正:** 103/84/97件はコードがポート未指定(`*`)・全プロトコル許可を含め、アプリ/Windowsサービスの対象制限（`ApplicationName`/`ServiceName`）を区別しない数値。**「TCP445を使ったSMBが103件許可」「危険設定84件」「WAN公開97件」と扱ってはいけない**。Windows COM `INetFwRule` 仕様では個別ruleに ApplicationName, ServiceName, LocalPorts, Protocol, Profiles, RemoteAddresses条件あり。MicrosoftのSMB防御推奨も実効アクセスとルーター公開の別検証を要請。決して既存811件のルールを一括停止しない。
+- **GitHub実装:** `scripts/windows_lan_firewall_readonly.ps1` を局所的に継ぎ足さず**完成ソース全置換**して、TCP445がportとして明示されたAllow(`EXPLICIT_TCP445_*`)と、一般の任意ポート系(`GENERIC_ANYPORT_*`)を分離。後者はアプリ/サービス限定か否かも区別。明示445許可についてPrivate/非Private、単一IPv4か否かを匿名件数で示し、実効通信やWAN公開を推測しない。`tests/test_windows_lan_probes_contract.py` には各分類の存在、破損source(二重フッタ/未閉regex)の再発防止を更新。Source commits `1b16bcf569975a61bced16bc00911f6f0430dc20`、`a96b05872bbfd3bead5b79057c44c305c4e36ad9`。**新scriptのWindows Parser/実機は未検証**。
+- **Exact Next:** Master PC clean→`git pull --ff-only`→unit3件→**PowerShell Parser.ParseFile errors 0**→新分類read-onlyファイアウォール監査。確定結果を使い既存汎用ルールへ影響せず、妻PCだけを受け入れるshare/firewallルールとrollbackを検討。妻Windows 10 ESU・実IP・Router WAN445は未確認のため`New-SmbShare`/FW変更を勝手に実行しない。
+
 ## 2026-10-28 Firewall監査ScriptのPowerShell ParserError｜破損source全体の置換と再発防止
 
 - **Master PC実測:** `git pull --ff-only origin main` で `83e1abe...` へ更新。Python `tests/test_windows_lan_probes_contract.py` = **2/2 PASS**。その後 `powershell.exe ... windows_lan_firewall_readonly.ps1` がWindows PowerShell構文解析時に `ParserError`。55行目 `Unexpected token FIREWALL_RULES_INSPECTED`、100行目 `string missing terminator`、閉じ `}` 不足等。**監査コードは実行されず**、Firewall/SMB共有/ACLの設定変更は発生しない。DockerとG:実保存、LAN-Inbox作成の実機PASSは維持。
