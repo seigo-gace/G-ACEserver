@@ -45,7 +45,12 @@ class LanProbes(unittest.TestCase):
         ):
             self.assertIn(expected, fw)
         self.assertIn("ESU_ENROLLMENT=NOT_VERIFIED", wife)
+        self.assertIn("OS_FAMILY_BY_BUILD=", wife)
+        self.assertIn("MASTER_GSERVER_MARKERS=BOTH_PRESENT", wife)
+        self.assertIn("HOST_ROLE_HINT=LIKELY_MASTER_GSERVER", wife)
+        self.assertIn("PATCH_CURRENCY=NOT_VERIFIED", wife)
         self.assertIn("LAN_IPV4_CANDIDATE=", wife)
+        self.assertIn("VIRTUAL_INTERFACE_IPV4_CANDIDATES_SKIPPED=", wife)
         self.assertIn("GetAllNetworkInterfaces()", wife)
 
     def test_no_truncated_regex_or_duplicate_footer(self):
