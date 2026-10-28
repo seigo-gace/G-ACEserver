@@ -1,4 +1,7 @@
-"""Basic static safety contract for read-only host/client LAN probes."""
+"""Static safety and corruption guards for the two read-only LAN probes.
+
+PowerShell syntax is separately checked on Windows by Parser.ParseFile before execution.
+"""
 from pathlib import Path
 import unittest
 
@@ -20,26 +23,38 @@ class LanProbes(unittest.TestCase):
                 self.assertIn("VERIFY=PASS", body)
                 self.assertIn("VERIFY=FAIL", body)
 
-    def test_version_and_firewall_specificity(self):
+    def test_explicit_smb_and_generic_app_rules_not_conflated(self):
         fw = (ROOT / FILES[0]).read_text()
-        win = (ROOT / FILES[1]).read_text()
-        self.assertIn("HNetCfg.FwPolicy2", fw)
-        self.assertIn("BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES=", fw)
-        self.assertIn("4000", fw)
-        self.assertIn("ESU_ENROLLMENT=NOT_VERIFIED", win)
-        self.assertIn("LAN_IPV4_CANDIDATE=", win)
-        self.assertIn("GetAllNetworkInterfaces()", win)
+        wife = (ROOT / FILES[1]).read_text()
+        for expected in (
+            "HNetCfg.FwPolicy2",
+            "EXPLICIT_TCP445_ALLOW_RULES=",
+            "EXPLICIT_TCP445_PRIVATE_NON_SINGLE_IP_RULES=",
+            "EXPLICIT_TCP445_APP_SERVICE_RESTRICTED=",
+            "GENERIC_ANYPORT_APP_SERVICE_RESTRICTED=",
+            "GENERIC_ANYPORT_OTHER=",
+            "UNKNOWN_PORT_SCOPE_RULES=",
+            "COUNTS_ARE_RULES_NOT_PROOF_OF_SMB_REACHABILITY",
+            "$rule.ApplicationName",
+            "$rule.ServiceName",
+            "4000",
+        ):
+            self.assertIn(expected, fw)
+        self.assertIn("ESU_ENROLLMENT=NOT_VERIFIED", wife)
+        self.assertIn("LAN_IPV4_CANDIDATE=", wife)
+        self.assertIn("GetAllNetworkInterfaces()", wife)
 
-    def test_firewall_script_regression_no_broken_regex_or_duplicate_tail(self):
+    def test_no_truncated_regex_or_duplicate_footer(self):
         fw = (ROOT / FILES[0]).read_text()
         self.assertEqual(fw.count("========== GACE_RESULT_BEGIN =========="), 1)
         self.assertEqual(fw.count("========== GACE_RESULT_END =========="), 1)
         self.assertEqual(fw.count("FIREWALL_RULES_INSPECTED="), 1)
-        self.assertEqual(fw.count("BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES="), 1)
-        self.assertIn("$singleIPv4 = $scope -match '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$'", fw)
-        self.assertIn("if (-not $singleIPv4 -and", fw)
+        self.assertEqual(fw.count("EXPLICIT_TCP445_ALLOW_RULES="), 1)
+        self.assertIn("$oneIPv4 = $scope -match '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$'", fw)
+        self.assertIn("if (-not $oneIPv4)", fw)
         self.assertEqual(fw.count("if (-not $ok) { exit 1 }"), 1)
         self.assertTrue(fw.rstrip().endswith("if (-not $ok) { exit 1 }"))
+
 
 if __name__ == "__main__":
     unittest.main()
