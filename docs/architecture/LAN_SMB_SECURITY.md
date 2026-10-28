@@ -37,3 +37,9 @@ Broad Write 2件はEveryone/Authenticated Users/Builtin Usersの許可を簡易�
 PC実測で `G:\\GserverStorage` および `G:\\GserverStorage\\files` は **NTFS**、ACL継承無効化はしていない。双方で `Authenticated Users` のALLOW Write相当 ACEが **2件・すべて継承**。これは4個の個別の無防備な共有を意味せず、SMB経由の実効アクセスもこの出力だけでは決まらない。親G:のACLを変更しない。親に広範Modifyが残るため、子だけ継承を遮断しても親からのDeleteChild等の実効権限まで遮断できたとは断定しない。
 
 新設するネットワーク受信用の候補は **`G:\\GserverStorage\\files\\LAN-Inbox` のみ**（既存の `README.md` が置かれた `files` 全体は共有しない）。`scripts/windows_lan_inbox.ps1` は明示 `-Prepare` で未存在の空子ディレクトリを作るだけで、その子の継承保護・SYSTEM/Admins/Owner限定ACLをreadback。SMB share、User、Windows Firewall、Router、Dockerは未変更。既存フォルダーの保護状態を勝手に改修せず拒否する。親側を安全化せずに「完全に独立したセキュアボリューム」と呼ばない。LANの実効アクセスは専用share ACLとNTFS ACLの積、およびFirewallのwife PC限定で追加検証。ロールバック時にユーザーのファイルを自動削除しない。
+
+## 2026-10-28 LAN-Inbox PC acceptance and upcoming network gates
+
+Actual Windows11 readback after `windows_lan_inbox.ps1 -Prepare`: **CREATED**, `INBOX_INHERITANCE_PROTECTED=True`, `INBOX_BROAD_ALLOW_COUNT=0`, `G_PARENT_ACL_CHANGED=False`, `SHARE_CREATED=False`, `FIREWALL_CHANGED=False`, `VERIFY=PASS`. Unit source contract 2/2 PASS. This is new-folder ACL readback, **not** proof of complete ACL isolation from parent DeleteChild privileges, successful Samba/NTFS read inside Docker, or wife-PC LAN access.
+
+Two follow-up **read-only** probes are implemented: `scripts/windows_lan_firewall_readonly.ps1` on Master PC counts active inbound TCP445 permit rules including broad remote scopes; `scripts/windows_wife_lan_readonly.ps1` on wife PC reads Windows build and LAN IPv4 candidates. Both avoid source file edits, usernames/passwords/MACs and network changes. Windows10 ESU enrollment remains **NOT_VERIFIED** unless observed separately. SMB3 encrypted network share creation/rollback is not executed. Do not enable unbounded firewall allow merely to make transfer work.

@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 LAN-Inbox作成・ACL隔離実PC PASS｜次の2PC間ネットワークゲート
+
+- **Master PC実測:** GitHub `8ae85ac...` fast-forward、`tests/test_windows_lan_inbox_contract.py` Python **2/2 PASS**。Windows `scripts/windows_lan_inbox.ps1 -Prepare` で `SAFE_PARENT`→`TARGET_COLLISION`→`CREATE_EMPTY_INBOX`→`SET_CHILD_ACL`→`READBACK`、`INBOX_STATE=CREATED`、`INBOX_INHERITANCE_PROTECTED=True`、`INBOX_BROAD_ALLOW_COUNT=0`、`G_PARENT_ACL_CHANGED=False`、`SHARE_CREATED=False`、`FIREWALL_CHANGED=False`、`VERIFY=PASS`。**`G:\\GserverStorage\\files\\LAN-Inbox` は実機作成・ACL個別保護PASS**。Dockerの認証付き一覧への反映、妻PCからの転送、復元はこれだけでは未実証。
+- **次の理由:** TCP445に新しいwife-PC専用Firewall Allowを足しても、既存Firewallの広域SMB-Allowルールが生きていれば実効アクセス制限にならない。既存許可を無断変更しないため、COM経由で許可ルールをbounded・非機密情報だけ読み取る `scripts/windows_lan_firewall_readonly.ps1` を実装。Protocol ANY/不明なRemoteAddressesは保守的に対象。妻Windows10側は `scripts/windows_wife_lan_readonly.ps1` でWindows build/UBRとNICのRFC1918 IPv4候補を収集し、**ESU加入と実パッチ保護はNOT_VERIFIED**として扱う。両source用の `tests/test_windows_lan_probes_contract.py` も追加。Source commit `7be59dd775974591d33c6cbedf26f43f24d21f3d`、Firewall scope判定修正 `fc6f0e2c930b400bb958c98cfd7f8c50cc391a83`。**Master PC実行/妻PC実行は未受領**。
+- **設計Gate:** 専用非管理者account・GserverTransfer共有 `EncryptData=True`・認証/NTFS ACE・妻PCの確認済みIPv4だけにTCP445を限定し、ほかの既存共有への影響/元に戻す手順を確保してからネットワーク共有を有効化する。SMB1有効化、Guest/匿名、Everyone広範Write、WAN445公開は禁止。妻PC Win10 ESU/更新とRouterのWAN公開はまだ不明。Windows10からSMB3暗号化が実接続できるか実測が必要。
+- **Exact Next:** Master PCはGit clean→fast-forward→`python3 -m unittest discover -s tests -p test_windows_lan_probes_contract.py -q`→`scripts/windows_lan_firewall_readonly.ps1` の**読取のみ**。その結果から既存Firewall broad allowと個別share制限の整合を確認。妻PCでのread-only OS/IP probeは後続の別Host操作。繰返しDocker/README/ACLinbox作成試験は不要。
+
 ## 2026-10-28 G: ACL詳細実測｜親からの広範権限継承、受信専用LAN-Inbox設計・コード
 
 - **Master Hostの確定実測:** `git pull --ff-only` で `bfce2d1...`、`scripts/windows_lan_acl_detail_readonly.ps1` 結果 `VERIFY=PASS`, `G_FILESYSTEM=NTFS`。親 `G:\\GserverStorage` と子 `G:\\GserverStorage\\files` は `*_INHERITANCE_PROTECTED=False` であり、各2件 `Authenticated Users` の広いALLOW ACEが**どちらも `INHERITED=True`**。`Modify, Synchronize` と `-536805376`（整数表示）で、`*_UNRESOLVED_ACE_COUNT=0`。4つの独立した権限ミスではなく、G:側の共通継承が両パスで見えている。権限の実効積は `SHARE_AND_NTFS_EFFECTIVE_ACCESS=NOT_VERIFIED`、`LAN_SHARE=NOT_CREATED_BY_THIS_CHECK`。**既存NTFS ACLは変更していない。**
