@@ -257,6 +257,37 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotIn("x" * 32, str(arguments))
         self.assertEqual(runner.call_args.kwargs["input"], payload)
 
+    def test_single_gateway_canary_never_saves_config_or_claims_queue(self):
+        self.controller.save({"current": self.old})
+        reference = "gserver:gserver-probe:probe-" + "a" * 32
+        output = "PRODUCER_EVENT_ID=" + reference + "\nGATEWAY_CANARY_202=PASS\n"
+        result = subprocess.CompletedProcess([], 0, stdout=output)
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight") as preflight, \
+             patch("ctl.subprocess.run", return_value=result) as runner:
+            self.controller.action("bot-gateway-canary")
+        preflight.assert_called_once()
+        runner.assert_called_once()
+        self.assertEqual(runner.call_args.kwargs["input"], preflight.call_args.args[0])
+        command = runner.call_args.args[0]
+        self.assertEqual(command[-2], "-c")
+        compile(command[-1], "<single-gateway-canary>", "exec")
+        self.assertIn("send_gateway", command[-1])
+        self.assertNotIn("BotSpool", command[-1])
+        self.assertNotIn("gateway-url", command[-1])
+        self.assertNotIn("cf-secret-5678", str(command))
+
+    def test_gateway_canary_preflight_failure_stops_before_event(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight", side_effect=ValueError("auth failure")), \
+             patch("ctl.subprocess.run") as runner:
+            with self.assertRaises(ValueError):
+                self.controller.action("bot-gateway-canary")
+            runner.assert_not_called()
+
     def test_gateway_preflight_passes_access_service_headers_separately(self):
         payload = json.dumps({
             "url": "https://private.example", "token": "z" * 32,
