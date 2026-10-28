@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 G:実ファイルコピー初成功｜保存・SHA256照合・認証付きAPI読戻しPASS
+
+- **Master PC実測**: WSL Ubuntuで `git pull --ff-only` により `ebd4ce3...` へfast-forward。最新 `app/storage.py` のcontextmanager修正を含む `python3 -m unittest discover -s tests -p test_gserver_files.py -q` = **5/5 PASS**、`python3 -m unittest discover -s tests -p test_storage.py -q` = **9/9 PASS**。Host CLI `python3 scripts/gserver_files.py put README.md` が `{"bytes":6226,"name":"README.md","sha256":"171b13dcef1bfd851eb88a3dd1090ff0a9a119e54850bab3cf58e90795a0bdeb"}` を返し、`cmp -s README.md /mnt/g/GserverStorage/files/README.md` 成功。CLI `list` = `README.md` file size 6226。sudo認証後のDocker `gserverctl.py storage-list` で認証付きAPIから同一実ファイルを読戻し。**`GSERVER_FILE_COPY=PASS`**。
+- **受入判定:** 単一ローカルファイルの `put`→G:指定子フォルダーへの**非上書き実書込み**→bytes/SHA256→OS同一比較→Dockerで認証済みAPI一覧、実PCでPASS。既存 `GserverStorage/files` の他ファイルやF:の原本は触らず、旧8765サービス/現18765ポート維持。再buildや新規有料AI/定期タスク不要。
+- **未完:** `get` の実G:読戻しをローカル別ディレクトリへ行った証拠はまだない。奥さんのWindows 10端末からLAN転送・共有ユーザー権限・Windowsファイアウォール/Privateネット判定・SMB認証・大容量動画の断続再開/速度/空き容量/クォータ・Windows再起動後自動復旧、Dev KB・TGS・バックアップ/復号隔離復元は**NOT_VERIFIED**。F01–F08全体完成とはしない。
+- **NEXT:** MasterのWindows 11・妻Windows 10の既存LAN環境をread-onlyで検査し、G:の単一許可フォルダーのみ**認証付き**SMB共有で転送できるよう安全な承認・ロールバック操作を設計する。Gserver 18765 HTTPは今まで通りPC内loopback限定、外部公開しない。SMB1/ゲスト共有/無制限Everyone書込/Firewall全開/家庭内ルータのポート転送は行わない。大容量転送はまずWindows標準SMBを再利用し、サーバー固有の独自HTTPアップローダーを重複実装しない。独立して実装できるDev KB/TGS連携にも継続着手。
+
 ## 2026-10-28 S3ファイル転送｜PC unit error 3件を診断し共有Storage例外境界を修正
 
 - **実PC観測:** Masterの `git pull --ff-only` によりHost checkoutが `3c3aaa2...` へfast-forward。`python3 -m unittest discover -s tests -p test_gserver_files.py -q` が `Ran 5 tests` 中 `3 errors`。ケース `test_existing_symlink_and_out_of_scope_paths_rejected`、`test_failed_partial_write_leaves_no_published_file`、`test_round_trip_hash_and_no_overwrite` で本来 `FileExistsError/OSError` を報告する場所に `storage.StorageUnavailable` が発生。そのため `&&` により `put README.md` とG:実書込・CLI list・Docker storage-listは**一切実行されていない**。既存Docker/Volume/API read-onlyの前回PASSを否定しない。
