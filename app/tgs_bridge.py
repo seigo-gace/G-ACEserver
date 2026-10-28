@@ -143,6 +143,18 @@ class BotSpool:
                          (key, fingerprint, packed, now))
             return {"status": "queued", "queued": True}
 
+    def retry_blocked(self, limit=100):
+        """Explicit operator repair after correcting 401/409/422; no automatic loops."""
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise BotEventError("RETRY_LIMIT_INVALID")
+        with contextlib.closing(self.connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("SELECT id FROM events WHERE state='blocked' ORDER BY created_at,id LIMIT ?",
+                                (limit,)).fetchall()
+            conn.executemany("UPDATE events SET state='pending',attempts=0,next_attempt=0,last_status='operator_retry' WHERE id=?",
+                             rows)
+            return len(rows)
+
     def counts(self):
         with contextlib.closing(self.connect()) as conn, conn:
             values = dict(conn.execute("SELECT state,COUNT(*) FROM events GROUP BY state").fetchall())
