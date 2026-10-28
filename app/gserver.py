@@ -7,6 +7,7 @@ import shutil
 import signal
 import threading
 import time
+import socket
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,7 @@ from logging.handlers import RotatingFileHandler
 from urllib.parse import parse_qs, quote, urlsplit
 from storage import Storage, StorageUnavailable, InvalidPath, byte_range
 from kb_source import inspect as inspect_existing_kb, KBSourceError
+from tgs_bridge import BotSpool, BotEventError, flush_once, gateway_token, MAX_BODY
 
 HOST = os.environ.get("GSERVER_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GSERVER_PORT", "8765"))
@@ -25,6 +27,10 @@ TOKEN_FILE = os.environ.get("GSERVER_AUTH_FILE", "")
 FILES_ROOT = os.environ.get("GSERVER_FILES_ROOT", "")
 # Opt-in only. Host KB is not present in the default isolated container.
 KB_ROOT = os.environ.get("GSERVER_KB_ROOT", "")
+BOT_SPOOL_DIR = os.environ.get("GSERVER_BOT_SPOOL_DIR", "")
+BOT_AUTH_FILE = os.environ.get("GSERVER_BOT_AUTH_FILE", "")
+BOT_GATEWAY_URL = os.environ.get("GSERVER_BOT_GATEWAY_URL", "")
+BOT_GATEWAY_TOKEN_FILE = os.environ.get("GSERVER_BOT_GATEWAY_TOKEN_FILE", "")
 FILES = Storage(G_MOUNT, FILES_ROOT) if FILES_ROOT else None
 
 logger = logging.getLogger("gserver")
@@ -70,6 +76,19 @@ def authorized(header):
         return False
 
 
+def authorized_bot(header):
+    # Bot-only credential must be distinct from the Owner admin bearer.
+    if not BOT_AUTH_FILE or not header or not header.startswith("Bearer "):
+        return False
+    try:
+        with open(BOT_AUTH_FILE, "rb") as stream:
+            expected = stream.read(4097).strip()
+        supplied = header[7:].encode("utf-8")
+        return 32 <= len(expected) <= 4096 and hmac.compare_digest(expected, supplied)
+    except (OSError, UnicodeError):
+        return False
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Gserver/1.0"
 
@@ -97,11 +116,47 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        self.request_id = uuid.uuid4().hex
+        path = self.path.split("?", 1)[0]
+        self.action = "bot_event" if path == "/bot/events" else "other"
+        if path != "/bot/events":
+            self._json({"error": "not_found"}, 404)
+            return
+        if "?" in self.path:
+            self._json({"error": "invalid_request"}, 400)
+            return
+        if not BOT_SPOOL_DIR or not BOT_AUTH_FILE:
+            self._json({"error": "bot_integration_not_configured"}, 503)
+            return
+        if not authorized_bot(self.headers.get("Authorization")):
+            self._json({"error": "unauthorized"}, 401)
+            return
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+            self._json({"error": "content_type_required"}, 415)
+            return
+        raw_len = self.headers.get("Content-Length", "")
+        if not raw_len.isdecimal() or not 1 <= int(raw_len) <= MAX_BODY:
+            self._json({"error": "invalid_content_length"}, 413)
+            return
+        try:
+            body = self.rfile.read(int(raw_len))
+            if len(body) != int(raw_len):
+                raise ValueError("incomplete_json")
+            value = json.loads(body.decode("utf-8"))
+            result = BotSpool(BOT_SPOOL_DIR).accept(value)
+            self._json(result, 202)
+        except BotEventError as error:
+            status = 409 if error.code == "EVENT_ID_CONFLICT" else (503 if error.code == "SPOOL_FULL" else 400)
+            self._json({"error": error.code}, status)
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+            self._json({"error": "bot_event_unavailable"}, 503)
+
     def do_GET(self):
         self.request_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         path = self.path.split("?", 1)[0]
-        self.action = path[1:] if path in ('/health', '/status', '/ready', '/storage', '/mounts', '/files', '/download', '/kb') else 'other'
+        self.action = path[1:] if path in ('/health', '/status', '/ready', '/storage', '/mounts', '/files', '/download', '/kb', '/bot/queue') else 'other'
 
         if path == "/health":
             self._json({"status": "ok", "service": "gserver"})
@@ -127,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if path not in ("/status", "/ready", "/storage", "/mounts", "/files", "/download", "/kb"):
+        if path not in ("/status", "/ready", "/storage", "/mounts", "/files", "/download", "/kb", "/bot/queue"):
             self._json({"error": "not_found"}, status=404)
             return
         if not authorized(self.headers.get("Authorization")):
@@ -136,6 +191,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/files", "/download"):
             self._files(path)
+            return
+
+        if path == "/bot/queue":
+            if "?" in self.path:
+                self._json({"error": "invalid_request"}, 400)
+                return
+            if not BOT_SPOOL_DIR:
+                self._json({"error": "bot_integration_not_configured"}, 503)
+                return
+            try:
+                self._json({"state": BotSpool(BOT_SPOOL_DIR).counts(),
+                            "tgs_delivery_configured": bool(BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE),
+                            "read_only": True})
+            except (BotEventError, OSError):
+                self._json({"error": "bot_queue_unavailable"}, 503)
             return
 
         if path == "/kb":
@@ -273,8 +343,29 @@ class Server(ThreadingHTTPServer):
             self.slots.release()
 
 
+def bot_gateway_worker(stop_signal):
+    # This is a Gserver thread, never a separate scheduled AI job or duplicate service.
+    # Without an explicit gateway URL/token file, events stay in local SQLite.
+    while not stop_signal.is_set():
+        try:
+            if BOT_SPOOL_DIR and BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE:
+                token = gateway_token(BOT_GATEWAY_TOKEN_FILE)
+                result = flush_once(BotSpool(BOT_SPOOL_DIR), BOT_GATEWAY_URL, token, limit=10)
+                if result["blocked"]:
+                    logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
+        except (BotEventError, OSError, ValueError):
+            logger.warning("bot_gateway_retryable_or_config_error")
+        stop_signal.wait(20)
+
+
 if __name__ == "__main__":
     server = Server((HOST, PORT), Handler)
+    worker_stop = threading.Event()
+    worker = None
+    if BOT_SPOOL_DIR and BOT_GATEWAY_URL and BOT_GATEWAY_TOKEN_FILE:
+        worker = threading.Thread(target=bot_gateway_worker, args=(worker_stop,),
+                                  name="gserver-tgs-relay", daemon=True)
+        worker.start()
     def stop(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
@@ -284,4 +375,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Gserver HTTP service stopped")
     finally:
+        worker_stop.set()
+        if worker is not None:
+            worker.join(timeout=5)
         server.server_close()
