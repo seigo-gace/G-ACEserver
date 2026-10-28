@@ -29,7 +29,7 @@ def prepare_storage(drive=STORAGE_DRIVE):
     try:
         for component in ("GserverStorage", "files"):
             try:
-                os.mkdir(component, mode=0o700, dir_fd=fd)
+                os.mkdir(component, mode=0o755, dir_fd=fd)
             except FileExistsError:
                 pass
             child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
