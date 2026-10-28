@@ -211,6 +211,39 @@ class LifecycleTests(unittest.TestCase):
                 self.controller.action('start')
             run.assert_not_called()
 
+    def test_loopback_profile_keeps_isolated_snapshot_and_limits_host_port(self):
+        source = self.controller.bundle(self.old, create=True, access='loopback').read_text()
+        self.assertIn('127.0.0.1:18765:8765', source)
+        self.assertIn('internal: true', source)
+        self.assertNotIn('network_mode: none', source)
+        self.assertIn('network_mode: none', self.controller.bundle(self.old).read_text())
+
+    def test_local_enable_disable_reuses_image_and_volume(self):
+        self.controller.save({'current': self.old})
+        with patch.object(self.controller, 'run'):
+            self.controller.action('enable-local')
+            self.assertEqual(self.controller.load(), {'current': self.old, 'access': 'loopback'})
+            self.controller.action('start')
+            self.controller.action('disable-local')
+            self.assertEqual(self.controller.load(), {'current': self.old})
+
+    def test_local_failure_recovers_original_profile(self):
+        self.controller.save({'current': self.old})
+        with patch.object(self.controller, 'run'), patch.object(self.controller, 'compose',
+            side_effect=[subprocess.CalledProcessError(1, 'up'), None]) as compose:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.controller.action('enable-local')
+        self.assertEqual(compose.call_args_list[1].args[2], 'isolated')
+        self.assertEqual(self.controller.load(), {'current': self.old})
+
+    def test_loopback_profile_survives_image_update(self):
+        self.controller.save({'current': self.old, 'access': 'loopback'})
+        self.controller.bundle(self.old, create=True, access='loopback')
+        with patch.object(self.controller, 'run'):
+            self.controller.activate(self.new)
+        self.assertEqual(self.controller.load(),
+            {'current': self.new, 'previous': self.old, 'access': 'loopback'})
+
     def test_malformed_release_record_fails_closed(self):
         for data in ([], {'current': None}, {'previous': 42}):
             self.controller.save(data)
