@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from kb_source import inspect, KBSourceError, F_ROOT
+from kb_source import inspect, verify_existing_projection, KBSourceError, F_ROOT
 
 
 def main():
@@ -14,12 +14,14 @@ def main():
     p.add_argument("--root", type=Path, default=F_ROOT)
     p.add_argument("--verify-hashes", action="store_true",
                    help="Stream and verify six authoritative files; no indexing")
+    p.add_argument("--verify-projection", action="store_true",
+                   help="Run the existing read-only F: Dev KB byte-exact Current verifier")
     args = p.parse_args()
     print("========== GACE_RESULT_BEGIN ==========")
     print("PROJECT=Gserver")
     print("ACTION=DEV_KB_CURRENT_READ_ONLY")
     try:
-        result = inspect(args.root, verify_hashes=args.verify_hashes)
+        result = inspect(args.root, verify_hashes=(args.verify_hashes or args.verify_projection))
         print("KB_CURRENT=" + result["current"])
         print("HISTORICAL_FORMAL_PRESENT=" + str(result["historical_formal_corpus_present"]))
         print("KB_SOURCE_PRESENT=" + str(result["existing_kb_source_present"]))
@@ -29,6 +31,11 @@ def main():
             print("KB_CATALOG_COMMIT=" + result["catalog_commit"])
             for key, value in sorted(result["counts"].items()):
                 print("KB_" + key.upper() + "=" + str(value))
+        if args.verify_projection:
+            projection = verify_existing_projection(args.root, result)
+            print("KB_EXISTING_RUNTIME_PROJECTION=" + projection["projection"])
+        else:
+            print("KB_EXISTING_RUNTIME_PROJECTION=NOT_VERIFIED")
         print("KB_SEARCH_E2E=NOT_VERIFIED")
         print("KB_CURRENT_CUTOVER=NOT_PERFORMED")
         print("F_SOURCE_MODIFIED=NONE")
