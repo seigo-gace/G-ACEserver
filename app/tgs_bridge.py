@@ -165,6 +165,13 @@ class BotSpool:
         now = int(time.time() if now is None else now)
         with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
+            # If a worker crashed on its final permitted send, the expired
+            # lease must become operator-visible. Never silently strand it
+            # in 'sending' or exceed the bounded retry budget.
+            conn.execute(
+                "UPDATE events SET state='blocked',next_attempt=0,last_status='requires_operator' "
+                "WHERE state='sending' AND next_attempt<=? AND attempts>=?",
+                (now, MAX_ATTEMPTS))
             row = conn.execute(
                 "SELECT id,payload,attempts FROM events WHERE state IN ('pending','sending') "
                 "AND next_attempt<=? AND attempts<? ORDER BY created_at,id LIMIT 1",
