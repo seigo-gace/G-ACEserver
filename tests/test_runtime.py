@@ -51,6 +51,46 @@ class RuntimeTests(unittest.TestCase):
         with response:
             return response.status, response.read()
 
+    def test_kb_status_requires_auth_and_mount(self):
+        self.assertEqual(self.request('/kb')[0], 401)
+        with patch.object(app, 'TOKEN_FILE', str(self.credential)), patch.object(app, 'KB_ROOT', ''):
+            status, body = self.request('/kb', 'Bearer ' + 'x' * 32)
+            self.assertEqual(status, 503)
+            self.assertEqual(json.loads(body)['error'], 'kb_mount_unavailable')
+
+    def test_kb_status_is_only_an_observer_not_search_or_content(self):
+        fixture = {'current': 'ACTIVE_AUTHORITY_CONSISTENT',
+                   'historical_formal_corpus_present': True,
+                   'existing_kb_source_present': True,
+                   'search_corpus_present': True,
+                   'kb_search_verified': False,
+                   'catalog_commit': 'a' * 40,
+                   'counts': {'knowledgeUnitCount': 8}}
+        with patch.object(app, 'TOKEN_FILE', str(self.credential)), \
+             patch.object(app, 'KB_ROOT', '/mnt/kb'), \
+             patch.object(app.os.path, 'ismount', return_value=True), \
+             patch.object(app, 'inspect_existing_kb', return_value=fixture) as observer:
+            status, body = self.request('/kb', 'Bearer ' + 'x' * 32)
+            self.assertEqual(status, 200)
+            output = json.loads(body)
+            self.assertEqual(output['current'], 'ACTIVE_AUTHORITY_CONSISTENT')
+            self.assertFalse(output['kb_search_verified'])
+            self.assertTrue(output['read_only'])
+            self.assertNotIn('catalog_commit', output)
+            self.assertNotIn('counts', output)
+            observer.assert_called_once()
+            self.assertEqual(observer.call_args.kwargs, {'enforce_mount': False})
+            self.assertEqual(self.request('/kb?source=secret', 'Bearer ' + 'x' * 32)[0], 400)
+
+    def test_kb_status_fail_closed_on_current_error(self):
+        with patch.object(app, 'TOKEN_FILE', str(self.credential)), \
+             patch.object(app, 'KB_ROOT', '/mnt/kb'), \
+             patch.object(app.os.path, 'ismount', return_value=True), \
+             patch.object(app, 'inspect_existing_kb', side_effect=app.KBSourceError('unknown')):
+            status, body = self.request('/kb', 'Bearer ' + 'x' * 32)
+            self.assertEqual(status, 503)
+            self.assertEqual(json.loads(body)['error'], 'kb_current_unverified')
+
     def test_liveness_does_not_claim_integration(self):
         code, body = self.request('/health')
         self.assertEqual(code, 200)
