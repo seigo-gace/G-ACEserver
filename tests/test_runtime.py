@@ -263,6 +263,44 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.controller.load(),
             {'current': self.new, 'previous': self.old, 'access': 'loopback'})
 
+    def test_read_only_storage_snapshot_and_credential_not_in_source(self):
+        snapshot = self.controller.bundle(self.old, create=True, access='loopback', storage=True)
+        body = snapshot.read_text()
+        self.assertIn('source: /mnt/g/GserverStorage', body)
+        self.assertIn('read_only: true', body)
+        self.assertIn('create_host_path: false', body)
+        self.assertIn('GSERVER_FILES_ROOT: /mnt/g/files', body)
+        self.assertIn('GSERVER_AUTH_FILE: /var/lib/gserver/auth-token', body)
+        self.assertNotIn('Bearer ', body)
+        self.assertNotEqual(snapshot, self.controller.bundle(self.old, access='loopback'))
+
+    def test_storage_activation_keeps_same_image_and_volume(self):
+        self.controller.save({'current': self.old, 'access': 'loopback'})
+        with patch.object(ctl, 'prepare_storage'), patch.object(self.controller, 'ensure_token'), \
+                patch.object(self.controller, 'run'), patch.object(self.controller, 'compose') as compose:
+            self.controller.action('enable-storage')
+            self.assertEqual(self.controller.load(), {'current': self.old, 'access': 'loopback', 'storage': True})
+            self.assertEqual(compose.call_args.args[3], True)
+            self.controller.action('start')
+            self.controller.action('disable-storage')
+            self.assertEqual(self.controller.load(), {'current': self.old, 'access': 'loopback'})
+
+    def test_storage_prevents_accidental_local_isolation(self):
+        self.controller.save({'current': self.old, 'access': 'loopback', 'storage': True})
+        with self.assertRaises(ValueError):
+            self.controller.action('disable-local')
+
+    def test_storage_requires_mount_and_rejects_symlink(self):
+        root = Path(self.temp.name) / 'fake-drive'
+        root.mkdir()
+        with patch.object(ctl.os.path, 'ismount', return_value=False):
+            with self.assertRaises(ValueError):
+                ctl.prepare_storage(root)
+        (root / 'GserverStorage').symlink_to(Path(self.temp.name), target_is_directory=True)
+        with patch.object(ctl.os.path, 'ismount', return_value=True):
+            with self.assertRaises(OSError):
+                ctl.prepare_storage(root)
+
     def test_malformed_release_record_fails_closed(self):
         for data in ([], {'current': None}, {'previous': 42}):
             self.controller.save(data)

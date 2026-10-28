@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import socket
 import subprocess
 import sys
@@ -16,6 +17,30 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "gserver"
 IMAGE = re.compile(r"sha256:[a-f0-9]{64}\Z")
 LOOPBACK_PORT = 18765
+STORAGE_DRIVE = Path("/mnt/g")
+STORAGE_HOST = STORAGE_DRIVE / "GserverStorage"
+
+def prepare_storage(drive=STORAGE_DRIVE):
+    """Make only the dedicated data subtree, without following existing links."""
+    if not os.path.ismount(drive):
+        raise ValueError("G drive not mounted; refusing storage activation")
+    fd = os.open(drive, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    device = os.fstat(fd).st_dev
+    try:
+        for component in ("GserverStorage", "files"):
+            try:
+                os.mkdir(component, mode=0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            if os.fstat(child).st_dev != device:
+                os.close(child)
+                raise ValueError("storage path crosses a mount")
+            os.close(fd)
+            fd = child
+    finally:
+        os.close(fd)
+
 
 
 class Controller:
@@ -28,13 +53,15 @@ class Controller:
         self.pending = state / "pending.json"
         self.docker = (["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]) + ["--host", "unix:///var/run/docker.sock"]
 
-    def bundle(self, image, create=False, access="isolated"):
+    def bundle(self, image, create=False, access="isolated", storage=False):
         if not isinstance(image, str) or not IMAGE.fullmatch(image):
             raise ValueError("immutable sha256 image ID required")
         if access not in ("isolated", "loopback"):
             raise ValueError("invalid access profile")
+        if not isinstance(storage, bool) or (storage and access != "loopback"):
+            raise ValueError("storage needs local-only access")
         directory = self.state / "bundles"
-        manifest = directory / (image[7:] + (".loopback-v2.json" if access == "loopback" else ".json"))
+        manifest = directory / (image[7:] + (".storage-ro-v1.json" if storage else ".loopback-v2.json" if access == "loopback" else ".json"))
         if create and not manifest.exists():
             source = (ROOT / "deploy/compose.gserver.yaml").read_text()
             source = source.replace("${GSERVER_IMAGE:?immutable_image_required}", image)
@@ -46,6 +73,26 @@ class Controller:
                     '    ports:\n      - "127.0.0.1:18765:8765"\n'
                     '    networks:\n      - gserver-local-v2\n', 1)
                 source += "\nnetworks:\n  gserver-local-v2:\n    driver: bridge\n"
+            if storage:
+                marker = "    volumes:\n      - state:/var/lib/gserver\n"
+                if source.count(marker) != 1:
+                    raise ValueError("unexpected volume contract")
+                mount = (
+                    "      - type: bind\n"
+                    "        source: /mnt/g/GserverStorage\n"
+                    "        target: /mnt/g\n"
+                    "        read_only: true\n"
+                    "        bind:\n"
+                    "          create_host_path: false\n"
+                )
+                source = source.replace(marker, marker + mount, 1)
+                env = (
+                    "    environment:\n"
+                    "      GSERVER_STORAGE_ROOT: /mnt/g\n"
+                    "      GSERVER_FILES_ROOT: /mnt/g/files\n"
+                    "      GSERVER_AUTH_FILE: /var/lib/gserver/auth-token\n"
+                )
+                source = source.replace("    read_only: true\n", env + "    read_only: true\n", 1)
             if "$" in source:
                 raise ValueError("unresolved deployment variables")
             directory.mkdir(mode=0o700, exist_ok=True)
@@ -85,10 +132,13 @@ class Controller:
         data = json.loads(self.record.read_text())
         if not isinstance(data, dict) or (data and 'current' not in data) or any(
             (k in ("current", "previous") and (not isinstance(v, str) or not IMAGE.fullmatch(v))) or
-            (k == "access" and v != "loopback") or k not in ("current", "previous", "access")
+            (k == "access" and v != "loopback") or
+            (k == "storage" and v is not True) or k not in ("current", "previous", "access", "storage")
             for k, v in data.items()
         ):
             raise ValueError("invalid release record")
+        if data.get("storage") and data.get("access") != "loopback":
+            raise ValueError("storage requires local-only access")
         return data
 
     def write_atomic(self, target, data):
@@ -118,30 +168,31 @@ class Controller:
             raise ValueError("invalid pending image")
         release = self.load()
         if release.get("current"):
-            self.compose(release["current"], ["up", "-d", "--wait", "--wait-timeout", "60"], release.get("access", "isolated"))
+            self.compose(release["current"], ["up", "-d", "--wait", "--wait-timeout", "60"], release.get("access", "isolated"), release.get("storage", False))
         else:
             self.compose(target, ["stop", "--timeout", "10"])
         self.pending.unlink()
 
-    def compose(self, image, args, access="isolated"):
-        snapshot = self.bundle(image, access=access)
+    def compose(self, image, args, access="isolated", storage=False):
+        snapshot = self.bundle(image, access=access, storage=storage)
         # Image is literal in the snapshot: sudo environment filtering is irrelevant.
         return self.run(["compose", "--project-name", self.project, "--env-file", "/dev/null",
                          "--project-directory", str(self.state), "-f", str(snapshot), *args])
 
-    def activate(self, image, access=None):
+    def activate(self, image, access=None, storage=None):
         if self.pending.exists():
             raise ValueError("interrupted operation; run recover first")
         if not IMAGE.fullmatch(image):
             raise ValueError("immutable sha256 image ID required")
         old = self.load()
         access = access or old.get("access", "isolated")
-        if access not in ("isolated", "loopback"):
-            raise ValueError("invalid access profile")
+        storage = old.get("storage", False) if storage is None else storage
+        if access not in ("isolated", "loopback") or (storage and access != "loopback"):
+            raise ValueError("invalid access/storage profile")
         self.run(["image", "inspect", image], capture=True)
-        self.bundle(image, create=True, access=access)
+        self.bundle(image, create=True, access=access, storage=storage)
         if old.get("current"):
-            self.bundle(old["current"], access=old.get("access", "isolated"))
+            self.bundle(old["current"], access=old.get("access", "isolated"), storage=old.get("storage", False))
         # First installation may not take over an existing project.
         if not old:
             existing = self.run(["ps", "-aq", "--filter",
@@ -150,12 +201,12 @@ class Controller:
                                 "label=com.docker.compose.project=" + self.project], capture=True)
             if existing.stdout.strip() or volumes.stdout.strip():
                 raise ValueError("unowned Gserver project exists; inspect before adoption")
-        self.write_atomic(self.pending, {"target": image, "access": access})
+        self.write_atomic(self.pending, {"target": image, "access": access, "storage": storage})
         try:
-            self.compose(image, ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], access)
+            self.compose(image, ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], access, storage)
         except (subprocess.SubprocessError, OSError):
             if old.get("current"):
-                self.compose(old["current"], ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], old.get("access", "isolated"))
+                self.compose(old["current"], ["up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60"], old.get("access", "isolated"), old.get("storage", False))
             else:
                 self.compose(image, ["stop", "--timeout", "10"])
             self.pending.unlink()
@@ -163,12 +214,35 @@ class Controller:
         new = {"current": image}
         if access == "loopback":
             new["access"] = "loopback"
+        if storage:
+            new["storage"] = True
         if old.get("current") and old["current"] != image:
             new["previous"] = old["current"]
         elif old.get("previous"):
             new["previous"] = old["previous"]
         self.save(new)
         self.pending.unlink()
+
+    def ensure_token(self):
+        """Generate the API credential inside the existing persistent volume, no stdout."""
+        script = (
+            "import os,secrets,stat\n"
+            "p='/var/lib/gserver/auth-token'\n"
+            "try:\n"
+            " f=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n"
+            "except FileExistsError:\n"
+            " f=None\n"
+            "if f is not None:\n"
+            " try:\n"
+            "  os.write(f,secrets.token_hex(32).encode())\n"
+            "  os.fsync(f)\n"
+            " finally:\n"
+            "  os.close(f)\n"
+            "s=os.stat(p,follow_symlinks=False)\n"
+            "assert stat.S_ISREG(s.st_mode) and s.st_uid==os.geteuid()\n"
+            "assert s.st_mode & 0o077 == 0 and 32<=s.st_size<=4096\n"
+        )
+        self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", script], capture=True)
 
     def action(self, action, image=None):
         if action == "recover":
@@ -184,8 +258,36 @@ class Controller:
             return self.activate(release["previous"])
         if not release.get("current"):
             raise ValueError("no installed release")
+        if action in ("enable-storage", "disable-storage"):
+            if release.get("access") != "loopback":
+                raise ValueError("enable local access first")
+            if action == "enable-storage":
+                if release.get("storage"):
+                    return self.compose(release["current"], ["ps", "--all"], "loopback", True)
+                prepare_storage()
+                self.ensure_token()
+                return self.activate(release["current"], storage=True)
+            if not release.get("storage"):
+                return self.compose(release["current"], ["ps", "--all"], "loopback")
+            return self.activate(release["current"], storage=False)
+        if action == "storage-list":
+            if not release.get("storage"):
+                raise ValueError("storage is not enabled")
+            code = (
+                "from pathlib import Path; import json,urllib.request;"
+                "t=Path('/var/lib/gserver/auth-token').read_text().strip();"
+                "q=urllib.request.Request('http://127.0.0.1:8765/files',"
+                "headers={'Authorization':'Bearer '+t});"
+                "r=urllib.request.urlopen(q,timeout=10);"
+                "print(r.read(65536).decode())"
+            )
+            result = self.run(["exec", "gace-gserver-gserver-1", "python3", "-c", code], capture=True)
+            print(result.stdout.rstrip())
+            return
         if action in ("enable-local", "disable-local"):
             desired = "loopback" if action == "enable-local" else "isolated"
+            if desired == "isolated" and release.get("storage"):
+                raise ValueError("disable storage before local access")
             if desired == release.get("access", "isolated"):
                 if desired == "loopback":
                     # Reconcile a recorded loopback profile whose actual port was
@@ -200,12 +302,12 @@ class Controller:
                 "stop": ["stop", "--timeout", "10"],
                 "status": ["ps", "--all"],
                 "logs": ["logs", "--tail", "50", "--no-color"]}[action]
-        self.compose(release["current"], args, release.get("access", "isolated"))
+        self.compose(release["current"], args, release.get("access", "isolated"), release.get("storage", False))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local"])
+    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list"])
     parser.add_argument("image", nargs="?")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
