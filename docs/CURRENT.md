@@ -1,4 +1,10 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F04 Master実機 Python検証で2件失敗 → ACTIVE模擬fixture修正
+
+- **Master WSL実測:** `git pull --ff-only` で `5433dd8` へ更新後、`python3 -m unittest discover -s tests -p test_kb_source.py -q` が**12 tests中 1 FAILURE, 1 ERROR**。該当: `test_existing_projection_probe_is_opt_in_read_only` が `KB_PROJECTION_CORPUS_MISSING`、`test_projection_timeout_fails_closed_without_reporting_pass` が同エラーのため期待した `KB_PROJECTION_VERIFIER_TIMEOUT` に進めなかった。**テスト用のACTIVE模擬Currentにrecordsディレクトリを作り忘れたことが原因**。F:本物の検査は`set -e`により未実行であり、F:原本や実KBの破損を示さない。
+- **Source修正済:** `tests/test_kb_source.py` の `active()` fixtureで `modulecatalog-reusable-current/records` を作成。既存テストのtimeout/既存元Verifier呼出まで到達できるようにした。さらに逆にrecordsが欠落した場合はverifierを呼ばず`KB_PROJECTION_CORPUS_MISSING`で拒否する新テストを追加（12→**13 tests**）。Source commit `166727539dc7c9d5cd708c4273fe749913f259a2`。GitHub readbackでfixture・テスト数・既存Verifier未再実装・read-onlyを確認。ただし**新13 testsはMaster実機未再実行でありPASSと称しない**。
+- **Next (止めずに接続):** Master既存WSL checkoutをclean確認→pull --ff-only→新`test_kb_source.py`を実行。合格した場合に限り`python3 scripts/gserver_kb.py`でF:の実際のCurrent/正式KB状態をread-only取得。Currentが存在しない場合は失敗を繰返すのではなく既存Dev KBの配置/プロセスの現実に合わせ、Gserver F04検索・受領/Current統合の実装へ進む。妻PC・SMB関連は引き続き除外。
+
 ## 2026-10-28 F03 G:実機E2E PASS → F04既存Dev KB統合Source実装
 
 - **F03 Master実測:** source 342334e までfast-forward後、storage系 unittest 22件PASS、既存ファイル転送 unittest 5件PASS。G:内の新規隔離試験フォルダーで put, hash, replace, trash, restore, get, quota 全工程PASS、BYTES_VERIFIED=1572900、USER_FILES_MODIFIED=NONE、SMB_FIREWALL_CHANGED=False、VERIFY=PASS。従来のF03読み取り・書込み機能に加え、可逆更新・復元・容量確認の実機統合を確認。USB切断/長時間/容量枯渇試験等は未完了なのでF03全体をACCEPTEDとはしない。
