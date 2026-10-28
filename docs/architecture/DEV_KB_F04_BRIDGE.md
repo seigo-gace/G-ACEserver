@@ -29,6 +29,10 @@ The authoritative KB remains seigo-gace/gace-dev-kb with mcp-vector-search 4.1.1
 - Some generalized ModuleCatalog features remain on an unmerged Dev KB feature branch. This adapter does not claim they are installed on the actual PC.
 - No F: to G: move or KB rebuild occurs. Migration requires source identity, full data/index inventory, transfer/hash proof, and independent rollback acceptance.
 
+## Windows-native existing MCP acceptance (explicit Master only)
+
+After the read-only WSL Current `--verify-counts --verify-projection` gate passes, the source-implemented `scripts/windows_existing_kb_mcp_acceptance.ps1` invokes the **existing** Dev KB repository's Windows history and reusable-asset MCP E2E test scripts against its already-installed Windows MVS runtime. It requires ACTIVE marker and runtime-state consistency, reads the actual expected Knowledge Unit count rather than hardcoding 720, and does not start a watcher, create a new search engine or perform any index build. It reports bounded PASS markers only when the original test's exit code is zero. A Windows MCP session may create runtime/cache state; do not label that an immutable read-only operation without a before/after source hash check. New contract tests: `tests/test_windows_existing_kb_mcp_contract.py`. Real Windows E2E has not run yet.
+
 ## Master PC read-only acceptance
 
 From the existing Gserver WSL repository: run Python test_kb_source.py and scripts/gserver_kb.py after clean git pull. Only if an ACTIVE snapshot is proven, --verify-hashes --verify-projection may be used for deeper read-only validation. Missing original KB runtime means the correct outcome is NOT_VERIFIED or a clear error, never a fabricated PASS.

@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 F04既存MVS/MCP本番検索回帰の受入Scriptを実装｜まだPC未実行
+
+- **Source実装:** `scripts/windows_existing_kb_mcp_acceptance.ps1` はすでにF:に存在するDev KB原本の `tests/mcp_knowledge_client_e2e.py` と `tests/mcp_reusable_asset_e2e.py` を、既存Windows `runtime/mcp-vector-search/Scripts/python.exe` で順番に起動。新MVS/新MCP server/別受領watcher/新task/new tokenを設置せず、既存ソースを再利用する。`MCP_ENABLE_FILE_WATCHING=false` と Python bytecode OFFを当該プロセスに限定し、最後に環境変数を復元。既存のACTIVE markerとruntime-stateのcommitとKnowledgeUnit countの一致を前提条件にする。結果は `KB_MCP_HISTORY=PASS` と `KB_MCP_REUSABLE_BM25_VECTOR_HYBRID_KG=PASS` を**既存本番プローブが終了コード0**の時だけ出力。生のKB検索結果・例外本文・ローカルパス・秘密を出力しない。Source `881d497742aa3b0ee71ef882a2449812df9eafca`, `ea5a695feb1d29b6813191771b207d8041977b80`。
+- **テストSource:** `tests/test_windows_existing_kb_mcp_contract.py`に元Dev KB 2 probes再利用・ACTIVE前提・新サービス/Task/索引作成禁止・構造化結果確認の4 static testsを追加。**この4件とWindows PowerShell parser、Windows MCP本番E2EはMaster PC未検証**。
+- **接続順序:** Gserver WSLの`test_kb_source.py`16件・MCP契約4件→`scripts/gserver_kb.py --verify-counts --verify-projection`（read-only実SHA/実件数/720 Markdown byte-exact）→全部PASSかつWindows PowerShell Parse PASSの場合のみ`windows_existing_kb_mcp_acceptance.ps1`→最後に同じF: read-only整合再照合。各Phaseで停止条件を守り、**F:の故障・Current改変時にMCPを起動しない**。MCPは検索ランタイムを実行するため正本ファイル未変更は実測SHA再照合によって検証する。Windows MPC runtimeのキャッシュ/一時状態作成有無は別項目であり無条件NONEと書かない。
+- **F04受入:** このテスト成功でも、Gserver新Docker内でMVSが動くこと・F→G移行・TGS連携・復元シナリオの実証までは完了しない。PhaseごとにSource/Host実測を分離し、完了主張をしない。
+
 ## 2026-10-28 F04 F:既存Currentの「実件数・実SHA・元Projection」3層照合Sourceへ進行
 
 - **確定したMaster実機:** F: read-only drvfs mount、KB root/原本/検索レコード全て存在、ACTIVE Current marker/state/receipt整合。Current宣言 `Formal=814 / Knowledge Units=720 / Relationships=720 / Cases=160`。まだ本物のMVS検索E2E/復元は未確認。
