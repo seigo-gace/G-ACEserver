@@ -152,6 +152,29 @@ class TgsBridgeTests(unittest.TestCase):
         body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
         self.assertEqual(send_gateway(body, "https://gateway.example", "testtoken", opener=Client()), "ack")
 
+    def test_gateway_redirect_never_forwards_bearer(self):
+        # Production opener must reject 3xx rather than forwarding Authorization.
+        from tgs_bridge import _NoGatewayRedirect
+        request = urllib.request.Request(
+            "https://gateway.example/internal/events", data=b"{}",
+            headers={"Authorization": "Bearer private-token"}, method="POST")
+        guard = _NoGatewayRedirect()
+        self.assertIsNone(guard.redirect_request(
+            request, None, 302, "Found", {},
+            "https://unexpected.example/receive"))
+
+        class RedirectClient:
+            def open(self, *_args, **_kwargs):
+                raise urllib.error.HTTPError(
+                    "https://gateway.example/internal/events",
+                    302, "Found", {"Location": "https://unexpected.example/receive"}, None)
+
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        with patch("tgs_bridge.urllib.request.build_opener", return_value=RedirectClient()) as build:
+            self.assertEqual(send_gateway(body, "https://gateway.example", "private-token"), "retry")
+        self.assertEqual(len(build.call_args.args), 1)
+        self.assertIsInstance(build.call_args.args[0], _NoGatewayRedirect)
+
     def test_unhashable_field_is_rejected_as_validation_error(self):
         with self.assertRaises(BotEventError):
             self.queue.accept(dict(sample(), event=["invalid"]))
