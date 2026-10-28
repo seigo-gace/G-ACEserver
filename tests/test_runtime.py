@@ -256,6 +256,38 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotIn("x" * 32, str(arguments))
         self.assertEqual(runner.call_args.kwargs["input"], payload)
 
+    def test_gateway_preflight_passes_access_service_headers_separately(self):
+        payload = json.dumps({
+            "url": "https://private.example", "token": "z" * 32,
+            "access_id": "cf-client-id-1234", "access_secret": "cf-secret-5678",
+        })
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\\n")
+        with patch("ctl.subprocess.run", return_value=result) as runner:
+            self.controller.bot_gateway_preflight(payload)
+        script = runner.call_args.args[0][-1]
+        compile(script, "<access-preflight>", "exec")
+        self.assertIn("CF-Access-Client-Id", script)
+        self.assertIn("CF-Access-Client-Secret", script)
+        self.assertIn("Authorization", script)
+        self.assertNotIn("cf-secret-5678", script)
+        self.assertEqual(runner.call_args.kwargs["input"], payload)
+
+    def test_gateway_config_accepts_optional_access_pair_without_cli_secret(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \\
+             patch("ctl.getpass.getpass", side_effect=["z" * 32, "cf-client-id-1234", "cf-secret-5678"]), \\
+             patch.object(self.controller, "bot_gateway_preflight") as preflight, \\
+             patch("ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\\n")) as writer:
+            self.controller.action("bot-gateway-config")
+        self.assertEqual(preflight.call_count, 1)
+        passed = json.loads(preflight.call_args.args[0])
+        self.assertEqual(passed["access_id"], "cf-client-id-1234")
+        self.assertEqual(passed["access_secret"], "cf-secret-5678")
+        self.assertIn("gateway-access-client-id", writer.call_args.args[0][-1])
+        self.assertIn("gateway-access-client-secret", writer.call_args.args[0][-1])
+        self.assertNotIn("cf-secret-5678", str(writer.call_args.args[0]))
+        self.assertEqual(writer.call_args.kwargs["input"], preflight.call_args.args[0])
+
     def test_gateway_config_preflight_failure_never_saves_or_sends_queue(self):
         self.controller.save({"current": self.old})
         with patch("builtins.input", return_value="https://private.example"), \
