@@ -47,9 +47,20 @@ try {
 
     $phase = 'SHARE_NAME'
     Write-Output ('PHASE=' + $phase)
-    $null = & "$env:SystemRoot\System32\net.exe" share GserverTransfer 2>$null
-    $reserved = $LASTEXITCODE -eq 0
-    Write-Output ('GSERVER_SHARE_NAME_IN_USE=' + $reserved)
+    # Read one exact registry value; absent shares must not generate native stderr.
+    # Avoid net.exe/PowerShell 5.1 NativeCommandError and unbounded CIM share scans.
+    $shares = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\LanmanServer\Shares')
+    if ($null -eq $shares) {
+        Write-Output 'GSERVER_SHARE_NAME_IN_USE=UNKNOWN'
+        Write-Output 'SHARE_REGISTRY=UNAVAILABLE'
+    } else {
+        try {
+            $reserved = $null -ne $shares.GetValue('GserverTransfer', $null)
+            Write-Output ('GSERVER_SHARE_NAME_IN_USE=' + [bool]$reserved)
+        } finally {
+            $shares.Close()
+        }
+    }
 
     $phase = 'PORT_445'
     Write-Output ('PHASE=' + $phase)
