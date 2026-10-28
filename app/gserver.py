@@ -14,6 +14,7 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from urllib.parse import parse_qs, quote, urlsplit
 from storage import Storage, StorageUnavailable, InvalidPath, byte_range
+from kb_source import inspect as inspect_existing_kb, KBSourceError
 
 HOST = os.environ.get("GSERVER_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GSERVER_PORT", "8765"))
@@ -22,6 +23,8 @@ LOG_PATH = Path(os.environ.get("GSERVER_LOG_DIR", str(APP_ROOT / "logs"))) / "gs
 G_MOUNT = os.environ.get("GSERVER_STORAGE_ROOT", "/mnt/g")
 TOKEN_FILE = os.environ.get("GSERVER_AUTH_FILE", "")
 FILES_ROOT = os.environ.get("GSERVER_FILES_ROOT", "")
+# Opt-in only. Host KB is not present in the default isolated container.
+KB_ROOT = os.environ.get("GSERVER_KB_ROOT", "")
 FILES = Storage(G_MOUNT, FILES_ROOT) if FILES_ROOT else None
 
 logger = logging.getLogger("gserver")
@@ -98,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
         self.request_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         path = self.path.split("?", 1)[0]
-        self.action = path[1:] if path in ('/health', '/status', '/ready', '/storage', '/mounts', '/files', '/download') else 'other'
+        self.action = path[1:] if path in ('/health', '/status', '/ready', '/storage', '/mounts', '/files', '/download', '/kb') else 'other'
 
         if path == "/health":
             self._json({"status": "ok", "service": "gserver"})
@@ -124,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if path not in ("/status", "/ready", "/storage", "/mounts", "/files", "/download"):
+        if path not in ("/status", "/ready", "/storage", "/mounts", "/files", "/download", "/kb"):
             self._json({"error": "not_found"}, status=404)
             return
         if not authorized(self.headers.get("Authorization")):
@@ -133,6 +136,26 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/files", "/download"):
             self._files(path)
+            return
+
+        if path == "/kb":
+            if "?" in self.path:
+                self._json({"error": "invalid_kb_request"}, 400)
+                return
+            if not KB_ROOT or not os.path.ismount(KB_ROOT):
+                self._json({"error": "kb_mount_unavailable", "kb_search_verified": False}, 503)
+                return
+            try:
+                result = inspect_existing_kb(Path(KB_ROOT), enforce_mount=False)
+            except (KBSourceError, OSError, ValueError):
+                self._json({"error": "kb_current_unverified", "kb_search_verified": False}, 503)
+                return
+            # No filesystem paths, content, tokens, hashes or receipts over HTTP.
+            self._json({"current": result["current"], "kb_search_verified": False,
+                        "existing_kb_source_present": result["existing_kb_source_present"],
+                        "historical_formal_corpus_present": result["historical_formal_corpus_present"],
+                        "search_corpus_present": result["search_corpus_present"],
+                        "read_only": True})
             return
 
         if path == "/ready":
