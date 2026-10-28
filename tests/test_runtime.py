@@ -215,6 +215,31 @@ class LifecycleTests(unittest.TestCase):
         self.controller.bundle(self.old, create=True)
         self.controller.bundle(self.new, create=True)
 
+    def test_bot_init_is_explicit_and_does_not_print_secret(self):
+        self.controller.save({"current": self.old})
+        with patch.object(self.controller, "run", return_value=subprocess.CompletedProcess([], 0, stdout="")) as runner:
+            self.controller.action("bot-init")
+        args = runner.call_args.args[0]
+        self.assertEqual(args[0:2], ["exec", "gace-gserver-gserver-1"])
+        self.assertIn("O_EXCL", args[-1])
+        self.assertIn("bot-auth-token", args[-1])
+        self.assertNotIn("secrets.token_hex(32).encode()", str(runner.call_args.kwargs))
+
+    def test_bot_smoke_reuses_running_container_not_fake_telegram(self):
+        self.controller.save({"current": self.old})
+        with patch.object(self.controller, "run", return_value=subprocess.CompletedProcess([], 0, stdout="BOT_EVENT_LOCAL_DURABLE_ACCEPT=PASS")) as runner:
+            self.controller.action("bot-smoke")
+        self.assertIn("/bot/events", runner.call_args.args[0][-1])
+        self.assertNotIn("/ingest/bulk", runner.call_args.args[0][-1])
+
+    def test_bot_gateway_setup_requires_private_input_and_https_before_docker(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="http://unsafe.example"), \
+             patch.object(self.controller, "run") as runner:
+            with self.assertRaises(ValueError):
+                self.controller.action("bot-gateway-config")
+            runner.assert_not_called()
+
     def test_update_and_rollback_persist_immutable_versions(self):
         self.controller.save({'current': self.old})
         with patch.object(self.controller, 'run'):
