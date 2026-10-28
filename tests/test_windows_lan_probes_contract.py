@@ -30,5 +30,16 @@ class LanProbes(unittest.TestCase):
         self.assertIn("LAN_IPV4_CANDIDATE=", win)
         self.assertIn("GetAllNetworkInterfaces()", win)
 
+    def test_firewall_script_regression_no_broken_regex_or_duplicate_tail(self):
+        fw = (ROOT / FILES[0]).read_text()
+        self.assertEqual(fw.count("========== GACE_RESULT_BEGIN =========="), 1)
+        self.assertEqual(fw.count("========== GACE_RESULT_END =========="), 1)
+        self.assertEqual(fw.count("FIREWALL_RULES_INSPECTED="), 1)
+        self.assertEqual(fw.count("BROAD_SCOPE_PRIVATE_TCP445_ALLOW_RULES="), 1)
+        self.assertIn("$singleIPv4 = $scope -match '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$'", fw)
+        self.assertIn("if (-not $singleIPv4 -and", fw)
+        self.assertEqual(fw.count("if (-not $ok) { exit 1 }"), 1)
+        self.assertTrue(fw.rstrip().endswith("if (-not $ok) { exit 1 }"))
+
 if __name__ == "__main__":
     unittest.main()
