@@ -1,4 +1,11 @@
 # CURRENT｜G-ACEserver
+## 2026-10-28 実PCローカルHTTP成功・G:専用読み取り接続を実装
+
+- **Host実測PASS:** MasterのWSL Ubuntu checkoutがGitHub `8090474...` までfast-forward。Python unit `28/28 PASS`、`sudo` PASS、`gserverctl.py enable-local` → Docker network `gace-gserver_gserver-local-v2` Created → Container `gace-gserver-gserver-1` Healthy。`docker port ... 8765/tcp` が **`127.0.0.1:18765`**、`curl http://127.0.0.1:18765/health` が **`{"status":"ok","service":"gserver"}`**。Compose `status` は `127.0.0.1:18765->8765/tcp`、末尾 **`GSERVER_LOCAL=PASS`**。PC Runtime接続ゲート合格。**Windows側のlocalhost到達/Windows再起動後自動再開はまだNOT_VERIFIED**。旧プロトタイプの8765・G:原本・TGS未変更。
+- **S3 GitHub実装（実機未検証）:** 既存イメージの `/files` `/download` 読み取りAPIを再利用し、`gserverctl.py enable-storage` / `disable-storage` / `storage-list` のCLIを追加。**固定専用 `G:\\GserverStorage\\files`**（WSL `/mnt/g/GserverStorage/files`）だけ作成し、Dockerへ親 `/mnt/g/GserverStorage` を `/mnt/g` として**read-only bind mount**、他のG:フォルダー/F:の原本を渡さない。WSL `/mnt/g` のmount証拠無しならfail closed、シンボリックリンク/別deviceは拒否。API bearer tokenは既存Docker永続volume内に非root0600権限でランダム生成して保持、公開GitHub/ログに出さない。compose snapshot別SHA・release ledgerのstorageフラグを維持、停止/再起動/rollbackは同じ永続Volumeを再利用。元imageの再ビルド不要。**本番動作・実ドライブのPermission/readbackは未受領**。
+- **受入境界:** 読み取り専用の専用フォルダー実利用を先に完成。アップロード/更新/削除・別PCからの転送・Dev KB/TGS・暗号backup/restore・Windows再起動後の持続起動は未実装/未実証。F01～F08を完了扱いしない。不要Web管理UIや重複CI/重い検証は増やさない。
+- **最短Exact Next:** MasterのPowerShell→WSLから clean check・`git pull --ff-only`・対象unitだけ・`sudo -v`・`gserverctl.py enable-storage`・`storage-list`・`status` を1回実行し、実G:マウントとDocker側認可APIのreadback。必要に応じてWindows PowerShellから `http://127.0.0.1:18765/health` 到達も確認。失敗時は対象原因に絞って修正。次は実ファイル送受信・既存Dev KB・TGS・復元を優先。
+
 ## 2026-10-28 ローカルHTTPポート公開失敗→原因特定・修正反映（PC再確認待ち）
 
 - **実機失敗:** Masterが `git pull --ff-only` で `6690bfe...` に更新後、`tests/test_runtime.py` Python **26 PASS**、`sudo` PASS、`python3 scripts/gserverctl.py enable-local` で `Network gace-gserver_gserver-local Created`、Container `Healthy` を確認。しかし `curl http://127.0.0.1:18765/health` は `curl: (7) Failed to connect`。再実行しても status の PORTS は **`8765/tcp`だけ**でホスト公開無し。**GSERVER_LOCAL=PASSは出ていない。** Docker service本体は保持中。原因を「ユーザーがポートを閉じた」と扱わない。
