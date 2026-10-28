@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
+import sys
 
 F_ROOT = Path("/mnt/f/G-ACE-KB")
 MAX_AUTH_JSON = 256 * 1024
@@ -171,6 +173,9 @@ def inspect(root=F_ROOT, *, verify_hashes=False, enforce_mount=True):
         raise KBSourceError("KB_FORMAL_COUNT_INVALID")
     if not baseline or not corpus or not kb_repo:
         raise KBSourceError("KB_RUNTIME_DEPENDENCY_MISSING")
+    # Fail closed if an activation changed while we were reading the Current.
+    if journal.exists() or _read_json(root, MARKER) != marker or _read_json(root, CURRENT + ("runtime-state.json",)) != state or _read_json(root, INTAKE + ("receipts", commit + ".json")) != receipt:
+        raise KBSourceError("KB_CURRENT_CHANGED_DURING_INSPECTION")
     return {
         "current": "ACTIVE_AUTHORITY_HASHED" if verify_hashes else "ACTIVE_AUTHORITY_CONSISTENT",
         "catalog_commit": commit,
@@ -184,3 +189,43 @@ def inspect(root=F_ROOT, *, verify_hashes=False, enforce_mount=True):
         "kb_runtime_projection_verified": False,
         "changes": "NONE",
     }
+
+
+def verify_existing_projection(root, authority, *, timeout_seconds=180):
+    """Reuse the installed Dev KB's actual byte-exact projection verifier.
+
+    This invokes only the existing read-only Python verifier. It never runs
+    index/activation/receiver, writes a manifest, or starts a scheduled service.
+    """
+    if authority.get("current") != "ACTIVE_AUTHORITY_HASHED":
+        raise KBSourceError("KB_PROJECTION_REQUIRES_HASHED_ACTIVE")
+    if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 300:
+        raise KBSourceError("KB_PROJECTION_TIMEOUT_INVALID")
+    commit = authority["catalog_commit"]
+    count = authority["counts"]["knowledgeUnitCount"]
+    if not count:
+        raise KBSourceError("KB_PROJECTION_COUNT_EMPTY")
+    script = _path(root, "repo", "scripts", "verify_modulecatalog_runtime_projection.py")
+    if not script.is_file():
+        raise KBSourceError("KB_EXISTING_VERIFIER_MISSING")
+    source_corpus = _path(root, *CURRENT, "records")
+    active_corpus = _path(root, "data", "knowledge-search", "records")
+    if not source_corpus.is_dir() or not active_corpus.is_dir():
+        raise KBSourceError("KB_PROJECTION_CORPUS_MISSING")
+    prefix = "accepted-modulecatalog-reusable-" + commit[:12] + "-"
+    command = [sys.executable, "-B", str(script), "--source-corpus", str(source_corpus),
+               "--runtime-corpus", str(active_corpus), "--prefix", prefix,
+               "--expected-count", str(count)]
+    try:
+        run = subprocess.run(command, capture_output=True, text=True,
+                             timeout=timeout_seconds, check=False)
+    except subprocess.TimeoutExpired:
+        raise KBSourceError("KB_PROJECTION_VERIFIER_TIMEOUT") from None
+    if run.returncode != 0 or "GACE_MODULECATALOG_RUNTIME_PROJECTION=PASS" not in run.stdout:
+        raise KBSourceError("KB_EXISTING_PROJECTION_VERIFIER_FAILED")
+    # Revalidate Current after the subprocess; a change invalidates the result.
+    current = inspect(root, verify_hashes=False, enforce_mount=False)
+    if current.get("catalog_commit") != commit or current.get("counts") != authority["counts"]:
+        raise KBSourceError("KB_CURRENT_CHANGED_AFTER_PROJECTION")
+    return {"projection": "EXISTING_KB_VERIFIER_PASS", "search_mcp_verified": False,
+            "changes": "NONE"}
