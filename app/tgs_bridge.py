@@ -216,11 +216,17 @@ def gateway_token(path):
     return token.decode("ascii")
 
 
+class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an internal API bearer credential across redirects."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def send_gateway(payload, endpoint, token, opener=None):
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
-    client = opener if opener is not None else urllib.request.build_opener()
+    client = opener if opener is not None else urllib.request.build_opener(_NoGatewayRedirect())
     try:
         with client.open(request, timeout=5) as response:
             code = response.status
@@ -234,7 +240,9 @@ def send_gateway(payload, endpoint, token, opener=None):
             return "retry"
         return "ack"
     except urllib.error.HTTPError as error:
-        if error.code in (400, 401, 403, 409, 413, 422):
+        # A redirect means the private internal endpoint is misconfigured.
+        # Require operator repair; never allow an automatic bearer replay.
+        if 300 <= error.code < 400 or error.code in (400, 401, 403, 409, 413, 422):
             return "blocked"
         return "retry"
     except (OSError, ValueError, TimeoutError):
