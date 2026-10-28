@@ -265,9 +265,9 @@ class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def send_gateway(payload, endpoint, token, opener=None):
+def send_gateway(payload, endpoint, token, opener=None, *, access_headers_override=None):
     headers = {"Content-Type": "application/json", "Authorization": "Bearer " + token}
-    headers.update(gateway_access_headers())
+    headers.update(gateway_access_headers() if access_headers_override is None else access_headers_override)
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         method="POST", headers=headers)
