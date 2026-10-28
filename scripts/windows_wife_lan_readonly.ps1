@@ -43,7 +43,17 @@ try {
     }
     foreach ($ip in $addresses) { Write-Output ('LAN_IPV4_CANDIDATE=' + $ip) }
     Write-Output ('LAN_IPV4_CANDIDATES=' + $addresses.Count)
-    Write-Output 'PRIVATE_NETWORK_PROFILE=NOT_VERIFIED'
+    $phase = 'NETWORK_PROFILE'
+    Write-Output ('PHASE=' + $phase)
+    try {
+        $profiles = @(Get-NetConnectionProfile -ErrorAction Stop | Where-Object {
+            $_.IPv4Connectivity -ne 'Disconnected' -and $_.IPv4Connectivity -ne 'NoTraffic'
+        })
+        Write-Output ('ACTIVE_PRIVATE_PROFILES=' + @($profiles | Where-Object { $_.NetworkCategory -eq 'Private' }).Count)
+        Write-Output ('ACTIVE_PUBLIC_PROFILES=' + @($profiles | Where-Object { $_.NetworkCategory -eq 'Public' }).Count)
+    } catch {
+        Write-Output 'NETWORK_PROFILES=NOT_VERIFIED'
+    }
     Write-Output 'SMB3_NEGOTIATED=NOT_VERIFIED'
     Write-Output 'SMB_ENCRYPTED_SESSION=NOT_VERIFIED'
     Write-Output 'SOURCE_FILES_UNCHANGED=True'
