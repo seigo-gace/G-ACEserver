@@ -5,6 +5,7 @@ At-least-once HTTP delivery uses stable sourceId/eventId and Gateway 202 receipt
 """
 import hashlib
 import contextlib
+import fcntl
 import hmac
 import json
 import os
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 
 PROJECT_ID = "P015"  # must be provisioned on the real TGserver before remote use
 DESTINATION = "tgserver-zero-bulk"
+# Explicit UA used consistently across Cloudflare Access preflight and live POST.
+GATEWAY_USER_AGENT = "Mozilla/5.0 (compatible; GACE-Gserver/1.0)"
 BOT = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 EVENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 KIND = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
@@ -28,6 +31,10 @@ MAX_PENDING = 5000
 MAX_SENT_RECEIPTS = 20000
 MAX_ATTEMPTS = 20
 MAX_BODY = 4096
+ACCESS_CLIENT_ID_FILE = "/var/lib/gserver/gateway-access-client-id"
+ACCESS_CLIENT_SECRET_FILE = "/var/lib/gserver/gateway-access-client-secret"
+GATEWAY_CONFIG_DIR = "/var/lib/gserver"
+GATEWAY_CONFIG_INCOMPLETE = "/var/lib/gserver/gateway-config-incomplete"
 ALLOWED = {"bot.started", "bot.stopped", "bot.error", "bot.recovered",
            "bot.request.completed", "bot.request.failed", "bot.update.received",
            "bot.delivery.completed", "bot.delivery.failed"}
@@ -165,6 +172,13 @@ class BotSpool:
         now = int(time.time() if now is None else now)
         with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
+            # If a worker crashed on its final permitted send, the expired
+            # lease must become operator-visible. Never silently strand it
+            # in 'sending' or exceed the bounded retry budget.
+            conn.execute(
+                "UPDATE events SET state='blocked',next_attempt=0,last_status='requires_operator' "
+                "WHERE state='sending' AND next_attempt<=? AND attempts>=?",
+                (now, MAX_ATTEMPTS))
             row = conn.execute(
                 "SELECT id,payload,attempts FROM events WHERE state IN ('pending','sending') "
                 "AND next_attempt<=? AND attempts<? ORDER BY created_at,id LIMIT 1",
@@ -216,11 +230,75 @@ def gateway_token(path):
     return token.decode("ascii")
 
 
-def send_gateway(payload, endpoint, token, opener=None):
+@contextlib.contextmanager
+def gateway_configuration_lock(directory=GATEWAY_CONFIG_DIR, *, shared=True):
+    """Coordinate the Bot worker and Owner multi-file Gateway configuration."""
+    folder = Path(directory)
+    if not folder.is_dir() or folder.is_symlink():
+        raise BotEventError("GATEWAY_CONFIG_DIRECTORY_UNSAFE")
+    fd = os.open(str(folder / "gateway-config.lock"),
+                 os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise BotEventError("GATEWAY_CONFIG_LOCK_UNSAFE")
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def gateway_access_headers(id_file=None, secret_file=None):
+    """Optional Cloudflare Access service credentials, distinct from Gateway Bearer.
+
+    Missing both means a non-Access private HTTPS route. Partial, malformed or
+    symlinked files fail closed, including before the spool worker claims rows.
+    """
+    id_path = Path(id_file or ACCESS_CLIENT_ID_FILE)
+    secret_path = Path(secret_file or ACCESS_CLIENT_SECRET_FILE)
+    if not id_path.exists() and not secret_path.exists():
+        if id_path.is_symlink() or secret_path.is_symlink():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        return {}
+    values = []
+    for file, limit in ((id_path, 255), (secret_path, 4096)):
+        if file.is_symlink() or not file.is_file():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        st = file.stat()
+        if st.st_size > limit or st.st_mode & 0o077:
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        content = file.read_bytes()
+        if any(ch < 33 or ch > 126 for ch in content):
+            raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INVALID")
+        values.append(content)
+    client_id, client_secret = values
+    if not client_id and not client_secret:
+        return {}
+    if len(client_id) < 8 or len(client_secret) < 8:
+        raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INCOMPLETE")
+    return {
+        "CF-Access-Client-Id": client_id.decode("ascii"),
+        "CF-Access-Client-Secret": client_secret.decode("ascii"),
+    }
+
+
+class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an internal API bearer credential across redirects."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def send_gateway(payload, endpoint, token, opener=None, *, access_headers_override=None):
+    headers = {"Content-Type": "application/json", "User-Agent": GATEWAY_USER_AGENT,
+               "Authorization": "Bearer " + token}
+    headers.update(gateway_access_headers() if access_headers_override is None else access_headers_override)
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
-    client = opener if opener is not None else urllib.request.build_opener()
+        method="POST", headers=headers)
+    client = opener if opener is not None else urllib.request.build_opener(_NoGatewayRedirect())
     try:
         with client.open(request, timeout=5) as response:
             code = response.status
@@ -234,7 +312,9 @@ def send_gateway(payload, endpoint, token, opener=None):
             return "retry"
         return "ack"
     except urllib.error.HTTPError as error:
-        if error.code in (400, 401, 403, 409, 413, 422):
+        # A redirect means the private internal endpoint is misconfigured.
+        # Require operator repair; never allow an automatic bearer replay.
+        if 300 <= error.code < 400 or error.code in (400, 401, 403, 409, 413, 422):
             return "blocked"
         return "retry"
     except (OSError, ValueError, TimeoutError):
