@@ -254,6 +254,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("data=b'{}'", probe)
         self.assertIn("answer.get('error')!='invalid internal event'", probe)
         self.assertIn("_NoGatewayRedirect", probe)
+        self.assertIn("GATEWAY_USER_AGENT", probe)
         self.assertNotIn("x" * 32, str(arguments))
         self.assertEqual(runner.call_args.kwargs["input"], payload)
 
