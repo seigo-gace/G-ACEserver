@@ -122,6 +122,20 @@ class TgsBridgeTests(unittest.TestCase):
                 gateway_endpoint(url)
         self.assertEqual(gateway_endpoint("https://gateway.example"), "https://gateway.example/internal/events")
 
+    def test_astera_zone_requires_owner_approval(self):
+        for url in (
+            "https://asterav8.jp",
+            "https://events.asterav8.jp/internal/events",
+            "https://EVENTS.ASTERAV8.JP.",
+            "https://events。asterav8.jp",
+        ):
+            with self.subTest(url=url), self.assertRaises(BotEventError) as caught:
+                gateway_endpoint(url)
+            self.assertEqual(caught.exception.code, "GATEWAY_DOMAIN_OWNER_APPROVAL_REQUIRED")
+        # A syntactically valid G-ACE zone URL is allowed; this does not assert it exists.
+        self.assertEqual(gateway_endpoint("https://gateway.g-acebot.com"),
+                         "https://gateway.g-acebot.com/internal/events")
+
     def test_gateway_config_lock_blocks_parallel_reader_until_writer_finishes(self):
         from tgs_bridge import gateway_configuration_lock
         folder = self.folder / "config"
