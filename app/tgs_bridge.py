@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 
 PROJECT_ID = "P015"  # must be provisioned on the real TGserver before remote use
 DESTINATION = "tgserver-zero-bulk"
+# Explicit UA used consistently across Cloudflare Access preflight and live POST.
+GATEWAY_USER_AGENT = "Mozilla/5.0 (compatible; GACE-Gserver/1.0)"
 BOT = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 EVENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 KIND = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
@@ -290,7 +292,8 @@ class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def send_gateway(payload, endpoint, token, opener=None, *, access_headers_override=None):
-    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + token}
+    headers = {"Content-Type": "application/json", "User-Agent": GATEWAY_USER_AGENT,
+               "Authorization": "Bearer " + token}
     headers.update(gateway_access_headers() if access_headers_override is None else access_headers_override)
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
