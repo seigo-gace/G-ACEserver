@@ -318,9 +318,9 @@ class Controller:
         probe = (
             "import json,sys,urllib.error,urllib.request\n"
             "sys.path.insert(0,'/opt/gserver/app')\n"
-            "from tgs_bridge import _NoGatewayRedirect,gateway_endpoint\n"
+            "from tgs_bridge import _NoGatewayRedirect,gateway_endpoint,GATEWAY_USER_AGENT\n"
             "value=json.load(sys.stdin)\n"
-            "headers={'Content-Type':'application/json','Authorization':'Bearer '+value['token']}\n"
+            "headers={'Content-Type':'application/json','User-Agent':GATEWAY_USER_AGENT,'Authorization':'Bearer '+value['token']}\n"
             "if bool(value.get('access_id'))!=bool(value.get('access_secret')):\n"
             " raise RuntimeError('GATEWAY_ACCESS_CREDS_INCOMPLETE')\n"
             "if value.get('access_id'):\n"
