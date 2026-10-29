@@ -215,6 +215,14 @@ def gateway_endpoint(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise BotEventError("GATEWAY_URL_UNSAFE")
+    # Master domain boundary: Gserver must not silently use Astera's Cloudflare zone.
+    # IDNA normalization also catches Unicode dot variants and a trailing DNS dot.
+    try:
+        hostname = parsed.hostname.encode("idna").decode("ascii").rstrip(".").lower()
+    except UnicodeError:
+        raise BotEventError("GATEWAY_DOMAIN_INVALID") from None
+    if hostname == "asterav8.jp" or hostname.endswith(".asterav8.jp"):
+        raise BotEventError("GATEWAY_DOMAIN_OWNER_APPROVAL_REQUIRED")
     if parsed.path not in ("", "/", "/internal/events"):
         raise BotEventError("GATEWAY_ENDPOINT_UNSUPPORTED")
     return url.rstrip("/") if parsed.path == "/internal/events" else url.rstrip("/") + "/internal/events"
