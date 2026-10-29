@@ -206,6 +206,28 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(client.headers["Cf-access-client-id"], "testclientid1234")
         self.assertEqual(client.headers["Cf-access-client-secret"], "testsecretvalue1234")
 
+    def test_gateway_post_uses_cloudflare_compatible_user_agent(self):
+        from tgs_bridge import GATEWAY_USER_AGENT
+        class Response:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-id"}'
+        class Client:
+            request = None
+            def open(self, request, **_kwargs):
+                self.request = request
+                return Response()
+        client = Client()
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        self.assertEqual(send_gateway(body, "https://gateway.example",
+                         "testtoken", opener=client,
+                         access_headers_override={"CF-Access-Client-Id": "id-demo",
+                                                  "CF-Access-Client-Secret": "secret-demo"}), "ack")
+        self.assertEqual(client.request.get_header("User-agent"), GATEWAY_USER_AGENT)
+        self.assertEqual(client.request.get_header("Authorization"), "Bearer testtoken")
+        self.assertEqual(client.request.get_header("Cf-access-client-id"), "id-demo")
+
     def test_gateway_redirects_never_forward_internal_bearer(self):
         # urllib's default POST 301/302/303 handler can copy Authorization
         # to a different origin. Our handler must refuse every redirect.
