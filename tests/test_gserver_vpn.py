@@ -263,6 +263,20 @@ class VPNTests(unittest.TestCase):
             status = vpn.preflight('qmcgaw/gluetun:latest')
         self.assertEqual(status['vpn'], 'IMMUTABLE_IMAGE_REQUIRED')
 
+    def test_hints_survives_docker_inventory(self):
+        digest = 'sha256:' + 'a' * 64
+        def fake_run(cmd, input=None, timeout=180):
+            if 'inspect' in cmd:
+                return digest + '\n'
+            if 'images' in cmd:
+                return 'qmcgaw/gluetun@' + digest + '\n'
+            return ''
+        with mock.patch.object(vpn, 'docker_access', return_value='OK'), \
+             mock.patch.object(vpn, 'run', side_effect=fake_run):
+            data = vpn.hints()
+        self.assertEqual(data['core_app_image'], digest)
+        self.assertEqual(data['suggested_gluetun_image'], 'qmcgaw/gluetun@' + digest)
+
     def test_existing_network_is_refused_without_container_or_image_changes(self):
         out, manifest = self.bundle()
         calls = []

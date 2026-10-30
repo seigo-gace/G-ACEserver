@@ -376,9 +376,9 @@ def load(directory):
     return directory, manifest
 
 
-def run(cmd, input=None):
+def run(cmd, input=None, timeout=180):
     try:
-        result = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=180, check=False)
+        result = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise VPNError('LOCAL_COMMAND_FAILED') from exc
     if result.returncode:
