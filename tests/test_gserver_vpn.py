@@ -143,7 +143,9 @@ class VPNTests(unittest.TestCase):
         self.assertEqual(app['user'], '65534:65534')
         self.assertNotIn('ports', gateway)
         self.assertNotIn('volumes', gateway)
-        self.assertEqual(config['configs']['vpn_dns']['content'].splitlines()[0], 'nameserver 127.0.0.1')
+        self.assertEqual(config['configs']['vpn_dns']['file'], './app-resolv.conf')
+        self.assertNotIn('content', config['configs']['vpn_dns'])
+        self.assertEqual((out / 'app-resolv.conf').read_text().splitlines()[0], 'nameserver 127.0.0.1')
         self.assertEqual(gateway['cap_add'], ['NET_ADMIN'])
         health = gateway['healthcheck']['test']
         self.assertIn('/run/gserver-guard/ready', ' '.join(health))

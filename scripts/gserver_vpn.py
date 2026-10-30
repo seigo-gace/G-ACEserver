@@ -27,6 +27,8 @@ SOCKET = 'unix:///var/run/docker.sock'
 GUARD = 'gserver_privacy'
 ENDPOINT_CACHE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gserver/vpn-profiles/endpoint-cache.json'
 TUNNEL_CREDENTIAL = 'cloudflared.credential'
+APP_RESOLV_FILE = 'app-resolv.conf'
+APP_RESOLV = 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'
 CLOUDFLARED_WAIT = ('while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; '
                     'while [ ! -f /run/gserver-tunnel/credential ]; do sleep 3600; done; '
                     'exec cloudflared tunnel --no-autoupdate run --token "$(cat /run/gserver-tunnel/credential)"')
@@ -400,7 +402,7 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
             'network_mode': 'service:vpn', 'depends_on': {'vpn': {'condition': 'service_healthy'}},
             'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700']}},
-        'configs': {'vpn_dns': {'content': 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'}}}
+        'configs': {'vpn_dns': {'file': './' + APP_RESOLV_FILE}}}
     if cloudflared_image:
         config['services']['cloudflared'] = {**read_only_sidecar, 'image': cloudflared_image, 'pull_policy': 'never',
             'user': '65534:65534', 'network_mode': 'service:vpn',
@@ -410,7 +412,8 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
                       '/run/gserver-tunnel:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65534,gid=65534']}
     contents = {'compose.json': json.dumps(config, indent=2) + '\n',
                 'guard.nft': guard_rules(selected, p['port']),
-                'wireguard.conf': wireguard_conf}
+                'wireguard.conf': wireguard_conf,
+                APP_RESOLV_FILE: APP_RESOLV}
     manifest = {'schema': 'gserver.vpn-bundle.v1', 'project': name,
                 'profile': {'path': p['path'], 'region': region, 'sha256': p['sha256']},
                 'components': sorted(config['services']),
@@ -433,7 +436,7 @@ def load(directory):
         manifest = json.loads(data)
         if manifest['schema'] != 'gserver.vpn-bundle.v1' or not PROJECT.fullmatch(manifest['project']):
             raise ValueError()
-        if set(manifest['hashes']) != {'compose.json', 'guard.nft', 'wireguard.conf'}:
+        if set(manifest['hashes']) != {'compose.json', 'guard.nft', 'wireguard.conf', APP_RESOLV_FILE}:
             raise ValueError()
         for name, digest in manifest['hashes'].items():
             _, raw = private_read(directory / name)

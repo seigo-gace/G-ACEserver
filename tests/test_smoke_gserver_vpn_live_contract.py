@@ -32,6 +32,10 @@ class VpnLiveSmokeContract(unittest.TestCase):
     def test_uses_gluetun_local_publicip_api(self):
         self.assertIn('127.0.0.1:8000/v1/publicip/ip', self.body)
 
+    def test_verifies_resolv_conf_in_container(self):
+        self.assertIn('verify_app_resolv_conf', self.body)
+        self.assertIn('APP_RESOLV_CONF_APPLIED=PASS', self.body)
+
     def test_failure_code_not_redacted_to_value(self):
         self.assertIn('LIVE_FAILURE_CODE=', self.body)
         self.assertNotIn('LIVE_FAILURE_DETAIL=', self.body)
