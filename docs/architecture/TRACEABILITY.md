@@ -18,3 +18,7 @@ F01〜F04/F06に対しS1-04で実コードのGitHub必須依存を確認し、F0
 TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PATH+SHA / CONFIG (redacted) / DATA_STORE / LOG_ID / TEST_COMMAND+EXIT / ROLLBACK / OBSERVED_STATUS / OWNER。
 
 実機の内部情報とセキュリティ証跡は公開GitHubへ貼らず、閉域で保管。GitHubには秘密のない要約と証拠照合IDを置く。
+
+## 2026-10-30 汎用アプリ責務の実装対応
+
+F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Compose→`gace-app-<name>`）。Core/API/Storageの既存 `scripts/gserverctl.py` とプロジェクト・volumeを分離する。検証は `tests/test_gserver_apps.py` と `tests/test_gserver_apps_smoke.py`、実機受入は `scripts/smoke_gserver_apps_host.sh` → `scripts/smoke_gserver_apps_host.py`。操作・症状・復旧対応は [APPS_RUNTIME](APPS_RUNTIME.md)。F05のBotログspool/Gateway連携は保持するが、F02の独立アプリ稼働を証明しない。F01/F06のWindows起動復帰とF04/F05/F08の最終受入は別Gateとして維持。

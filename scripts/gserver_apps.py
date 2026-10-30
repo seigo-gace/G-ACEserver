@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 
 NAME = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
 DOCKER_SOCKET = "unix:///var/run/docker.sock"
@@ -59,6 +60,17 @@ def run(argv, timeout=90):
     return result.stdout
 
 
+def local_path(value, directory):
+    try:
+        path = Path(value).resolve(strict=True)
+        path.relative_to(directory.resolve())
+        if not (path.is_file() or path.is_dir()):
+            raise ValueError()
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        raise AppError("APP_BIND_PATH_NOT_ALLOWED") from exc
+    return str(path)
+
+
 def validate(file, name):
     root = command(file, name)
     raw = run(root + ["config", "--format", "json"])
@@ -76,7 +88,15 @@ def validate(file, name):
             for value in definitions.values()
         ):
             raise AppError("EXTERNAL_RESOURCE_NOT_ALLOWED")
-    for svc in services.values():
+        for key_name, value in definitions.items():
+            expected = project(name) + "_" + key_name
+            if value.get("name", expected) != expected:
+                raise AppError("CROSS_PROJECT_RESOURCE_NOT_ALLOWED")
+            if value.get("driver") not in (None, "local" if key == "volumes" else "bridge") or value.get("driver_opts"):
+                raise AppError("RESOURCE_DRIVER_NOT_ALLOWED")
+    for service_name, svc in services.items():
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", service_name):
+            raise AppError("COMPOSE_SERVICE_INVALID")
         if not isinstance(svc, dict):
             raise AppError("COMPOSE_SERVICE_INVALID")
         if svc.get("build"):
@@ -87,21 +107,48 @@ def validate(file, name):
             raise AppError("HOST_PRIVILEGES_NOT_ALLOWED")
         if svc.get("network_mode") not in (None, "none") or svc.get("devices") or svc.get("cap_add"):
             raise AppError("HOST_PRIVILEGES_NOT_ALLOWED")
+        if any(svc.get(key) for key in ("use_api_socket", "provider", "post_start", "pre_stop", "develop", "external_links", "gpus")):
+            raise AppError("HOST_PRIVILEGES_NOT_ALLOWED")
+        if svc.get("pid") or svc.get("ipc") not in (None, "private", "shareable"):
+            raise AppError("CROSS_PROJECT_CONTAINER_NOT_ALLOWED")
+        if svc.get("uts") == "host" or svc.get("cgroup") == "host" or svc.get("runtime") not in (None, "runc"):
+            raise AppError("HOST_PRIVILEGES_NOT_ALLOWED")
+        if svc.get("deploy", {}).get("resources", {}).get("reservations", {}).get("devices"):
+            raise AppError("HOST_PRIVILEGES_NOT_ALLOWED")
         for port in svc.get("ports", []) or []:
             # Block unexpected LAN/public exposure; apps remain local until
             # an independently approved authenticated ingress is configured.
             if not isinstance(port, dict) or port.get("host_ip") not in ("127.0.0.1", "::1"):
                 raise AppError("PUBLIC_PORT_NOT_ALLOWED")
         for volume in svc.get("volumes", []) or []:
+            if not isinstance(volume, dict) or volume.get("type") not in ("bind", "volume", "tmpfs"):
+                raise AppError("APP_MOUNT_TYPE_NOT_ALLOWED")
             if isinstance(volume, dict) and volume.get("type") == "bind":
-                target = str(volume.get("source", ""))
-                if target == "/var/run/docker.sock" or target == "/" or target.startswith("/run/docker"):
-                    raise AppError("HOST_SOCKET_OR_ROOT_MOUNT_NOT_ALLOWED")
-    return root, sorted(services)
+                volume["source"] = local_path(volume.get("source"), file.parent)
+                volume.setdefault("bind", {})["create_host_path"] = False
+    for key in ("secrets", "configs"):
+        for value in (config.get(key, {}) or {}).values():
+            if value.get("external") or not value.get("file"):
+                raise AppError("EXTERNAL_RESOURCE_NOT_ALLOWED")
+            value["file"] = local_path(value["file"], file.parent)
+    return config, sorted(services)
 
 
-def execute(action, file, name):
-    root, services = validate(compose_file(file), name)
+def execute(action, file, name, show_logs=False):
+    file = compose_file(file)
+    config, services = validate(file, name)
+    # Operate on exactly the normalized configuration that passed validation.
+    # Compose's canonical output already escapes literal dollars for reuse.
+    with tempfile.TemporaryDirectory(prefix="gserver-app-config-") as directory:
+        snapshot = Path(directory) / "compose.json"
+        snapshot.write_text(json.dumps(config))
+        snapshot.chmod(0o600)
+        root = command(snapshot, name)
+        root[root.index("--project-directory") + 1] = str(file.parent)
+        operate(action, root, services, name, show_logs)
+
+
+def operate(action, root, services, name, show_logs=False):
     print("PROJECT=" + project(name))
     print("SERVICES=" + ",".join(services))
     if action == "verify":
@@ -132,6 +179,8 @@ def execute(action, file, name):
         stdout = run(root + ["logs", "--tail", "20", "--no-color"])
         print("APP_LOG_BYTES=" + str(len(stdout.encode())))
         print("APP_LOGS_AVAILABLE=PASS")
+        if show_logs:
+            print(stdout[-65536:])
     else:
         raise AppError("INVALID_ACTION")
 
@@ -141,9 +190,10 @@ def main():
     parser.add_argument("action", choices=("verify", "start", "stop", "status", "logs"))
     parser.add_argument("name", help="App label: lowercase letters, digits, and dashes")
     parser.add_argument("compose", help="Existing Compose YAML path (app-owned)")
+    parser.add_argument("--show-logs", action="store_true", help="Display app log contents locally (may contain private data)")
     args = parser.parse_args()
     try:
-        execute(args.action, args.compose, args.name)
+        execute(args.action, args.compose, args.name, args.show_logs)
     except AppError as exc:
         print("GSERVER_APP_ERROR=" + str(exc), file=sys.stderr)
         return 1

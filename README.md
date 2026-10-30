@@ -1,14 +1,10 @@
 # G-ACEserver
 
-> **Status: BOT/TGS SOURCE_IMPLEMENTED / GSERVER_BOT_DOCKER_E2E_PENDING**
+> **Status: local Core / authentication / G: Storage verified by owner; generic app runtime acceptance pending.**
 
-The existing Python prototype is now imported and packaged with an immutable-base Dockerfile, persistent bounded logs, an authenticated status UI/API, and offline Compose lifecycle/rollback tooling. See [current evidence](docs/CURRENT.md) and [runtime operation boundary](docs/architecture/RUNTIME_S2.md). The base deployment exposes no host ports and mounts no original data. Container execution is pending local sudo authentication; this is not final production acceptance.
+Gserver is a general-purpose Docker/Compose server on the owner's Windows PC / WSL Ubuntu. Independent apps own their code, images, Compose definitions and data. Telegram Bot and Tumblr are app examples; TGserver provides separate logging/backup services. Normal local operation needs no GitHub, Gateway, Cloudflare or VPN connection.
 
-Gserver is a Docker/Compose-first self-hosted service platform on the owner's Windows PC / WSL Ubuntu, designed to share an operational contract with existing Contabo Docker hosts and future additional servers. Its goal is one resource-efficient, extensible pseudo-cloud of web applications, independent services, storage, the existing G-ACE Development Knowledge Base, and TGserver (TGS) logging/backup integrations. The source design is adopted; Gserver Docker runtime is NOT deployed or verified.
-
-## Immediate priority — Telegram Bot-ready Gserver
-
-Implement the Bot local runtime and existing TGserver ZERO connection first; Dev KB is postponed by the owner. See [Bot-to-TGserver contract](docs/architecture/BOT_TGS_BRIDGE.md), [safe one-shot Bot-ready installation](scripts/gserver_bot_ready.py), and [Current](docs/CURRENT.md). Telegram live delivery is NOT VERIFIED despite TGserver source registry CI PASS.
+The existing Core and Storage remain running. [PR #15](https://github.com/seigo-gace/G-ACEserver/pull/15) adds the independent app CLI; see [app operation and acceptance](docs/architecture/APPS_RUNTIME.md) and [current evidence](docs/CURRENT.md). Management uses the existing VS Code/Cursor WSL terminal. The full [F01–F08 acceptance](docs/requirements/FINAL_ACCEPTANCE.md) remains open.
 
 ## Start here
 
@@ -23,7 +19,7 @@ Implement the Bot local runtime and existing TGserver ZERO connection first; Dev
 - **通常のWeb/API/KB/TGS接続等をDockerコンテナ単位に分割**し、各ホストはDocker Engine + Docker Composeを基本とする。ホスト依存（Windows/WSL起動、USB mount、Firewall、daemon）だけはHost管理。Contabo既存Docker環境を変更しない。
 - **GserverとContabo等の共通項は運用契約**（サービス定義、名前、health、ログ、resource bound、secretの渡し方、永続volume、backup/restore、更新/rollback）。Windowsのドライブパス等、物理Host固有の設定値まで同一化しない。
 - VS Code + WSL UbuntuをGserver操作入口とし、Windowsに開発用Node/Python/Dockerを二重導入する前提にしない。増設時もコンテナ/Compose単位で追加・分離し、必要以上の共通集中基盤を最初から作らない。
-- **現在のWSL実測:** Docker Engine導入済み（引継ぎ29.9.2）、Compose v5.6.1を現セッションで確認。既存Podman等は維持。本体の修正後Docker起動はsudo認証待ちで未検証。10/23の`docker=NOT_FOUND`は過去記録。
+- **現在のWSL実測:** Docker Engine導入済み（引継ぎ29.9.2）、Compose v5.6.1を現セッションで確認。既存Podman等は維持。10/30のOwner実機検証で既存Core Healthy・認証付きStorage API 200。独立アプリE2Eと再起動復帰は別途未受入。10/23の`docker=NOT_FOUND`は過去記録。
 - Copilot製ローカルPython HTTP試作の稼働は、Docker化済み/本番設計完了を示さない。正式設計と移行単位は[OVERVIEW](docs/architecture/OVERVIEW.md)と[S2](docs/tasks/S2.md)に統一。Telegram系5資産の採否は別作業。
 
 ## 採用：GitHub開発管理とGserver通常運用の分離

@@ -1,3 +1,18 @@
+# 2026-10-30 Codex｜汎用アプリ管理の統合・保護修正（F02/S2、F07）
+
+- **目的・優先:** [Master訂正](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6513092077)と原F01〜F08を照合。既存Core/認証/G: Storage PASSを維持し、独立Composeアプリ→共存・復旧→Windows起動継続性→Storage未受入保護→F04/F05→F08の順で進める。詳細な操作・復旧は [APPS_RUNTIME](architecture/APPS_RUNTIME.md)。
+- **Source:** 既存PR #15 / `chat/gserver-generic-app-runtime-20261030`を再利用。PC既存branch `710d04f`までの未マージ修正をmergeして消失を防止。Coreのapp/Dockerfile/deploy/.dockerignoreは同PC branchから差分0、実行中コンテナやvolumeの変更なし。
+- **修正:** 個別アプリの明示network/volume名による他プロジェクト共有、driver経由Host mount、app外bind/secret/config、Host権限hook等を拒否。検証済みComposeの一時canonical snapshotで操作し、検証後の定義再読込を除去。ログ内容は明示 `--show-logs` の時だけ表示。基本操作にbuild/pull/down/volume削除なし。
+- **PC受入Source:** 既存Coreのlocal imageだけで2個の合成アプリを隔離起動するforeground probeへ拡張。共存・停止分離・永続化・設定更新/旧設定復帰・status/logs・Core認証付きready/files応答hash・全既存containerのID/image/start time/state/mount不変を確認。新規random projectだけをguardし、成功/失敗時ともprobe自身のcontainer/volumeをcleanup。アプリ実機PASSはまだない。
+- **検証:** 既存全回帰199件PASS（loopback待受が必要なためsandbox外実行）。追加のcleanup境界4件を含む重点20件PASS。実Docker Compose v5.6.1のcanonical JSON再読込・literal dollar保持PASS、shell syntax・diff check PASS。CI未実行。新probe実行は `APP_SMOKE_DOCKER_SUDO_AUTH_REQUIRED` で停止（container起動0、Core変更0）。認証情報は収集していない。
+- **F01/F06読取:** WSL systemd設定true、docker/containerdともenabled/active。Windows ScheduledTaskのActionでwslを直接呼ぶものは0件。他の起動経路は未照合なので自動起動不在と断定しない。実Windows再起動→復帰は未受入。容量はローカルで確認、公開Currentへ実機詳細は転載しない。
+- **成果の評価:** PR #15は直接再利用。既存Core/Storage/認証・既存PC修正は維持。Bot API/spool/Worker・P015関連は既存資産として保持しF05へ後置、pendingデータを削除/送信しない。Cloudflare/VPNは必要用途の段階で評価。Bot/TGS必須経路の優先誤記だけを今訂正し、撤去のためのCore再buildを行わない。
+- **残務（F別）:** F01=Windows起動復帰/依存・資源実測。F02=今回probeのPC実起動・共存/停止・復旧、実アプリ機能は各app所有。F03=USB断/認可外/容量・大容量/復旧の残Gate。F04=既存KB/MVS/Current/検索・受領rollback実統合。F05=ログ運用契約・切断spool・暗号backup取得/復号/隔離復元。F06=起動/監視/資源/回復。F07=変更責務・逆引き更新済、実運用証拠は継続。F08=GitHub遮断・障害/復元を含む全受入。番号/46タスク/最終要件は維持。
+- **Rollback:** 本作業はCore未配備。app設定更新のrollbackは前Compose/ローカルimageへ戻し同じnameでstart、volume保持。schema変更はアプリ側backup/復元契約が必要。probeの設定rollbackは同imageの再作成試験であり、異image/DB移行の証明ではない。
+- **Exact Next:** 本人の既存WSLターミナルで `cd /mnt/g/Project/Gserver/repository && bash scripts/smoke_gserver_apps_host.sh`。この1回のforeground実行内で20重点テスト→sudo本人認証→2アプリprobe→cleanup/既存状態照合を行う。全PASSでF02基盤のその範囲のみ実機受入。Windows設定/再起動/外部サービス変更は未実施。F01〜F08全体完成とはしない。
+
+---
+
 # Current priority (2026-10-30 JST) — Gserver is a generic PC server, not a Telegram product
 
 **Master's latest scope:** Gserver on the user's Windows 11 / WSL Ubuntu PC provides Docker/Compose, independent app lifecycle, local API, G: Storage, safety/recovery and optional secure network egress. Telegram Bot and Tumblr are separate app projects, not Gserver Core features. TGserver is for logs/backup as an optional separate service, not a Bot runtime prerequisite. Never change the existing shared Webhook Gateway internals without Master's explicit service-owner instruction. Do not change Contabo/Astera or Astera-owned domains for Gserver. VPN is a design option to improve source-IP privacy, not a blanket requirement that blocks locally usable server functions.

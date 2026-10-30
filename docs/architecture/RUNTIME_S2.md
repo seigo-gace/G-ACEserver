@@ -1,5 +1,8 @@
 # S2 runtime packaging and operations
 
+> 2026-10-30: Existing Core/Owner authentication/G: Storage ready/files are owner-verified on the PC. Earlier pending-runtime statements below describe historical packaging gates. Current independent app work uses [APPS_RUNTIME](APPS_RUNTIME.md); Core redeployment and Gateway/TGS delivery are not prerequisites. Windows reboot recovery and full F01–F08 remain open.
+
+
 Owner: Codex. Existing F01–F08 / 46 tasks remain unchanged.
 
 ## Source and boundary
