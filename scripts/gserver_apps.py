@@ -59,7 +59,7 @@ def run(argv, timeout=90):
         raise AppError("DOCKER_COMMAND_FAILED") from exc
     if result.returncode != 0:
         # Don't print Docker stderr; Compose may reveal environment variables.
-        raise AppError("DOCKER_COMMAND_FAILED", diagnostic=result.stderr[-4096:])
+        raise AppError("DOCKER_COMMAND_FAILED", diagnostic=(result.stderr + "\n" + result.stdout)[-8192:])
     return result.stdout
 
 

@@ -1,3 +1,12 @@
+# 2026-10-31 追補｜Master返却の電源断後受入・app exit128
+
+- **Master実機:** 20 app tests / 3 recovery tests PASS。同一端末sudo後、Core health、container Healthy、認証付きStorage ready/files、SQLite quick_checkすべてPASS、spool_rows=2。`current_recovery_checks=PASS`。Windows→WSL自動起動、電源断前後全データ比較、全体復元受入は従来どおり未証明。
+- **独立app:** `APP_SMOKE_APP_START` FAIL、`PROBE_EXIT_CODE=128`、OOMKilled=False、process logs取得不可。cleanup後Core/Storage/他container不変PASS。Docker/OCIの起動前エラーが疑われるが、**原因はまだ確定していない**。capability/認証/Firewallを緩める修正は行わない。
+- **診断修正:** 以前の取得漏れだったDocker `State.Error` とCompose stdout+stderrを、random合成projectに限定してcleanup前に取得。表示では私有path/IP/opaque値を除去、完全な合成起動エラーだけをWSL private state `gserver/verification/app-smoke-error.json`へ0600保存。実app Config/Env/Token/SQLite内容は収集しない。重点23 tests PASS（起動前エラー・log欠落・私有表示/保存の回帰3件追加）。
+- **次の最小実測:** 復旧受入全体を再実行せず、同じWSL端末でsudo認証→D側 `scripts/smoke_gserver_apps_host.py`のみ実行。原因エラー/receiptを用いて修正を継続する。本人のsudo認証はCodex側端末へ引き継げず、直接Docker読取は未達。既存Docker journalの限定読取でも該当起動エラーは取得できなかった。
+
+---
+
 # 2026-10-31 Codex｜電源断後の確認・D側編集元統一・通信保護設計レビューと実装
 
 - **Owner/場所:** 本対話のCodexが継続。G側旧copyとD側WSL ext4のHEAD/branch/clean一致を実測後、D側を唯一の編集元へ固定。G側は無変更で保護。D側だけ新しいdesign/sourceを持つため、以後G側で実装/commitしない。Cursorは起動中で既存のWindows配置にjunctionなし。認証/履歴/GUI完全切替は未受入、live User Data移動/再導入は実施しない。

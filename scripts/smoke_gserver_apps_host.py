@@ -45,6 +45,39 @@ print(json.dumps(digests))
     return result
 
 
+def safe_runtime_error(value):
+    """Only for Docker errors of this script's guarded synthetic probes."""
+    value = str(value)
+    value = apps.re.sub(r"[\x00-\x1f\x7f]", " ", value)
+    value = apps.re.sub(r"https?://[^\s\"]+", "<url>", value)
+    value = apps.re.sub(r"/[A-Za-z0-9_./:@+~=-]+", "<path>", value)
+    value = apps.re.sub(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", "<ip>", value)
+    value = apps.re.sub(r"[A-Za-z0-9_+/=-]{32,}", "<value>", value)
+    return value[:1500]
+
+
+def save_diagnostic(value):
+    # Only our synthetic project's runtime errors; never inspect Config/Env,
+    # credentials, real application logs, request payloads or SQLite content.
+    directory = Path.home() / ".local/state/gserver/verification"
+    try:
+        if directory.resolve() != directory:
+            return False
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_uid != apps.os.geteuid() or directory.stat().st_mode & 0o077:
+            return False
+        with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as stream:
+            path = Path(stream.name)
+            json.dump(value, stream)
+        try:
+            path.replace(directory / "app-smoke-error.json")
+        finally:
+            path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 def main():
     phase = "PRECHECK"
     created = []
@@ -154,6 +187,10 @@ def main():
             if apps.re.fullmatch(r"[A-Z_]+", code):
                 print("APP_FAILURE_DETAIL=" + code, flush=True)
             if phase in ("APP_START", "STOP_ISOLATION", "UPDATE_ROLLBACK"):
+                diagnostic = {"schema": "gserver.synthetic-app-error.v1", "phase": phase,
+                              "compose_error": getattr(exc, "diagnostic", ""), "containers": []}
+                if diagnostic["compose_error"]:
+                    print("PROBE_COMPOSE_ERROR=" + safe_runtime_error(diagnostic["compose_error"]))
                 for name in created:
                     try:
                         ids = docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + apps.project(name)).split()
@@ -164,6 +201,10 @@ def main():
                             state = row.get("State", {})
                             print("PROBE_EXIT_CODE=" + str(int(state.get("ExitCode", -1))))
                             print("PROBE_OOM_KILLED=" + str(bool(state.get("OOMKilled", False))))
+                            diagnostic["containers"].append({"exit_code": state.get("ExitCode"),
+                                "oom_killed": state.get("OOMKilled"), "runtime_error": state.get("Error", "")})
+                            if state.get("Error"):
+                                print("PROBE_RUNTIME_ERROR=" + safe_runtime_error(state["Error"]))
                             # Only classified error types, never paths/tokens.
                             log = docker("logs", "--tail", "20", container_id)
                             for error in ("PermissionError", "FileNotFoundError", "SyntaxError", "Read-only file system", "ModuleNotFoundError"):
@@ -171,6 +212,8 @@ def main():
                                     print("PROBE_PROCESS_ERROR=" + error.replace(" ", "_"))
                     except (apps.AppError, ValueError, KeyError, TypeError):
                         print("PROBE_DIAGNOSTIC=UNAVAILABLE")
+                if diagnostic["compose_error"] or diagnostic["containers"]:
+                    print("PROBE_PRIVATE_DIAGNOSTIC=" + ("SAVED" if save_diagnostic(diagnostic) else "UNAVAILABLE"))
                 diagnostic = getattr(exc, "diagnostic", "").lower()
                 for fragment, reason in (("permission denied", "PERMISSION_DENIED"),
                         ("no such image", "LOCAL_IMAGE_MISSING"), ("unhealthy", "HEALTHCHECK_FAILED"),
