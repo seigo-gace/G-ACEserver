@@ -76,8 +76,9 @@ class VPNTests(unittest.TestCase):
         self.write(PROFILE.replace('10.10.0.2/32','10.10.0.2/32, fd00::2/128').replace('93.184.216.34','vpn.example.com'))
         with mock.patch('socket.getaddrinfo', side_effect=AssertionError('DNS forbidden')):
             self.assertEqual(vpn.profile(self.path,'jp')['endpoint'], 'vpn.example.com')
-            with self.assertRaisesRegex(vpn.VPNError, 'ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED'):
-                vpn.render(self.root/'no-pin','jp',self.path,VPN_IMAGE,APP_IMAGE)
+            with mock.patch.object(vpn, 'endpoint_pins', return_value={}):
+                with self.assertRaisesRegex(vpn.VPNError, 'ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED'):
+                    vpn.render(self.root/'no-pin','jp',self.path,VPN_IMAGE,APP_IMAGE)
             out=self.root/'pinned'
             vpn.render(out,'jp',self.path,VPN_IMAGE,APP_IMAGE,'93.184.216.34')
         runtime=(out/'wireguard.conf').read_text()
@@ -137,10 +138,20 @@ class VPNTests(unittest.TestCase):
         self.assertNotIn('volumes', gateway)
         self.assertEqual(config['configs']['vpn_dns']['content'].splitlines()[0], 'nameserver 127.0.0.1')
         self.assertEqual(gateway['cap_add'], ['NET_ADMIN'])
+        health = gateway['healthcheck']['test']
+        self.assertIn('/run/gserver-guard/ready', ' '.join(health))
+        self.assertIn('start_period', gateway['healthcheck'])
         self.assertEqual(gateway['restart'], 'no')
         self.assertIn('gserver-guard/ready', gateway['entrypoint'][-1])
         self.assertEqual(gateway['environment']['FIREWALL'], 'on')
         self.assertNotIn('FIREWALL_OUTBOUND_SUBNETS', gateway['environment'])
+
+    def test_sanitize_diagnostic_redacts_long_tokens(self):
+        raw = 'compose_up_vpn_wait_healthy: error PrivateKey=abc ' + ('x' * 40)
+        cleaned = vpn.sanitize_diagnostic(raw)
+        self.assertIn('compose_up_vpn_wait_healthy', cleaned)
+        self.assertNotIn('x' * 40, cleaned)
+        self.assertIn('<redacted>', cleaned)
 
     def test_direct_dns_ipv6_and_wan_are_not_generally_allowed(self):
         rules = vpn.guard_rules('93.184.216.34', 51820)

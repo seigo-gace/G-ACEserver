@@ -128,10 +128,17 @@ def main():
                 require_cloudflared=bool(tunnel_image and tunnel_cred),
             )
             phase = 'RENDER_BUNDLE'
-            manifest = vpn.render(bundle, region, profile, vpn_image, app_image,
-                                  cloudflared_image=tunnel_image)
+            use_tunnel = bool(tunnel_image and tunnel_cred)
+            manifest = vpn.render(
+                bundle,
+                region,
+                profile,
+                vpn_image,
+                app_image,
+                cloudflared_image=tunnel_image if use_tunnel else None,
+            )
             project = manifest['project']
-            if tunnel_image and tunnel_cred:
+            if use_tunnel:
                 src = Path(tunnel_cred).expanduser()
                 if not src.is_file() or src.stat().st_mode & 0o077:
                     raise vpn.VPNError('CLOUDFLARED_CREDENTIAL_MISSING')
@@ -169,7 +176,7 @@ def main():
             except (apps.AppError, vpn.VPNError):
                 print('VPN_KILL_SWITCH=PASS', flush=True)
             phase = 'CLOUDFLARE'
-            if tunnel_image and tunnel_cred:
+            if use_tunnel:
                 ids = docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + project,
                              '--filter', 'label=com.docker.compose.service=cloudflared').split()
                 if len(ids) != 1:
@@ -186,7 +193,7 @@ def main():
             failure = phase
             print('LIVE_FAILURE_CODE=' + live_failure_detail(exc), flush=True)
             if getattr(exc, 'diagnostic', ''):
-                print('LIVE_COMMAND_ERROR=' + safe_runtime_error(exc.diagnostic), flush=True)
+                print('LIVE_COMMAND_ERROR=' + vpn.sanitize_diagnostic(exc.diagnostic, limit=1500), flush=True)
         finally:
             if created and project:
                 try:

@@ -379,8 +379,9 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
                 'SHADOWSOCKS': 'off', 'LOG_LEVEL': 'warn'},
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m', '/gluetun:rw,nosuid,nodev,size=16m',
                       '/run/gserver-guard:rw,noexec,nosuid,nodev,size=1m,mode=0700'],
-            'healthcheck': {'test': ['CMD', '/gluetun-entrypoint', 'healthcheck'],
-                            'interval': '10s', 'timeout': '5s', 'retries': 6}},
+            'healthcheck': {'test': ['CMD', '/bin/sh', '-ec',
+                '[ -f /run/gserver-guard/ready ] || exit 0; exec /gluetun-entrypoint healthcheck'],
+                            'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '30s'}},
         'app': {**shared, 'image': app_image, 'pull_policy': 'never', 'user': '65534:65534',
             'network_mode': 'service:vpn', 'depends_on': {'vpn': {'condition': 'service_healthy'}},
             'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
@@ -432,13 +433,25 @@ def load(directory):
     return directory, manifest
 
 
-def run(cmd, input=None, timeout=180):
+def sanitize_diagnostic(text, limit=512):
+    if not text:
+        return ''
+    cleaned = re.sub(r'[\x00-\x1f\x7f]', ' ', str(text))
+    cleaned = re.sub(r'[A-Za-z0-9_+/=-]{32,}', '<redacted>', cleaned)
+    cleaned = re.sub(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', '<ip>', cleaned)
+    cleaned = re.sub(r'(PrivateKey|PresharedKey|Bearer|token=)\S*', r'\1<redacted>', cleaned, flags=re.I)
+    return cleaned[:limit].strip()
+
+
+def run(cmd, input=None, timeout=180, *, step=''):
     try:
         result = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise VPNError('LOCAL_COMMAND_FAILED') from exc
+        raise VPNError('LOCAL_COMMAND_FAILED', diagnostic=step or type(exc).__name__) from exc
     if result.returncode:
-        raise VPNError('LOCAL_COMMAND_FAILED')
+        detail = sanitize_diagnostic(((result.stderr or '') + '\n' + (result.stdout or '')).strip())
+        diagnostic = (step + ': ' + detail) if step and detail else (step or detail or 'nonzero_exit')
+        raise VPNError('LOCAL_COMMAND_FAILED', diagnostic=diagnostic)
     return result.stdout
 
 
@@ -494,8 +507,8 @@ def start(directory):
     created = False
     try:
         created = True
-        run(compose + ['up', '-d', '--no-build', '--pull', 'never', 'vpn'])
-        ids = run(compose + ['ps', '-q', 'vpn']).split()
+        run(compose + ['up', '-d', '--no-build', '--pull', 'never', 'vpn'], step='compose_up_vpn_bootstrap')
+        ids = run(compose + ['ps', '-q', 'vpn'], step='compose_ps_vpn').split()
         if len(ids) != 1:
             raise VPNError('VPN_CONTAINER_MISSING')
         info = json.loads(run(docker + ['inspect', ids[0]]))[0]
@@ -511,10 +524,11 @@ def start(directory):
         _, wireguard = private_read(directory / 'wireguard.conf')
         run(docker + ['exec', '-i', ids[0], '/bin/sh', '-ec',
                      'umask 077; mkdir -p /gluetun/wireguard; cat > /gluetun/wireguard/wg0.conf'],
-            input=wireguard.decode('ascii'))
-        run(docker + ['exec', ids[0], '/bin/sh', '-ec', 'touch /run/gserver-guard/ready'])
-        ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '90']
-        run(compose + ready + ['vpn'])
+            input=wireguard.decode('ascii'), step='docker_exec_wireguard_conf')
+        run(docker + ['exec', ids[0], '/bin/sh', '-ec', 'touch /run/gserver-guard/ready'],
+            step='docker_exec_guard_ready')
+        ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120']
+        run(compose + ready + ['vpn'], step='compose_up_vpn_wait_healthy', timeout=150)
         # Verify independent guard survived the VPN's own firewall setup before
         # giving any application access to this network namespace.
         current = namespace_guard(pid)
@@ -534,7 +548,7 @@ def start(directory):
             run(docker + ['exec', '-i', tunnel_ids[0], '/bin/sh', '-ec',
                            'umask 077; cat > /run/gserver-tunnel/credential'], input=token.decode('ascii'))
         if 'app' in config['services']:
-            run(compose + ready + ['app'])
+            run(compose + ready + ['app'], step='compose_up_app_wait_healthy', timeout=150)
     except BaseException:
         if created:
             try:
