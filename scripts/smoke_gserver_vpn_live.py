@@ -5,7 +5,6 @@ import io
 import json
 import os
 from pathlib import Path
-import secrets
 import sys
 import tempfile
 import time
@@ -73,6 +72,29 @@ def resolve_images():
     return app, gluetun, tunnel if tunnel != 'LOCAL_PINNED_IMAGE_MISSING' else None
 
 
+def validate_live_preflight(status, region, *, require_cloudflared=False):
+    """Require endpoint pin and images only for the selected VPN region."""
+    if region not in vpn.REGIONS:
+        raise vpn.VPNError('REGION_INVALID')
+    pin_key = 'endpoint_pin_' + region
+    if status.get(pin_key) == 'NOT_CONFIGURED':
+        raise vpn.VPNError('ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED')
+    for image_key in ('vpn', 'app'):
+        if status.get(image_key) == 'LOCAL_PINNED_IMAGE_MISSING':
+            raise vpn.VPNError('LOCAL_PINNED_IMAGE_MISSING')
+    if require_cloudflared and status.get('cloudflared') == 'LOCAL_PINNED_IMAGE_MISSING':
+        raise vpn.VPNError('LOCAL_PINNED_IMAGE_MISSING')
+
+
+def live_failure_detail(exc):
+    """Map structured errors to stable codes; sanitize only unstructured runtime text."""
+    if isinstance(exc, (vpn.VPNError, apps.AppError)):
+        code = str(exc)
+        if apps.re.fullmatch(r'[A-Z0-9_]{1,64}', code):
+            return code
+    return safe_runtime_error(str(exc))
+
+
 def main():
     region = os.environ.get('GSERVER_VPN_REGION', 'jp')
     if region not in vpn.REGIONS:
@@ -97,15 +119,14 @@ def main():
             storage_before = storage()
             app_image, vpn_image, tunnel_image = resolve_images()
             vpn.profile(profile, region)
-            pins = vpn.endpoint_pins()
-            if region not in pins:
+            if region not in vpn.endpoint_pins():
                 raise vpn.VPNError('ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED')
             status = vpn.preflight(vpn_image, app_image, tunnel_image)
-            for key, value in status.items():
-                if key.startswith('endpoint_pin_') and value == 'NOT_CONFIGURED':
-                    raise vpn.VPNError('ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED')
-                if value == 'LOCAL_PINNED_IMAGE_MISSING':
-                    raise vpn.VPNError('LOCAL_PINNED_IMAGE_MISSING')
+            validate_live_preflight(
+                status,
+                region,
+                require_cloudflared=bool(tunnel_image and tunnel_cred),
+            )
             phase = 'RENDER_BUNDLE'
             manifest = vpn.render(bundle, region, profile, vpn_image, app_image,
                                   cloudflared_image=tunnel_image)
@@ -163,8 +184,7 @@ def main():
             print('PERFORMANCE=NOT_VERIFIED', flush=True)
         except (apps.AppError, vpn.VPNError, OSError, ValueError, KeyError, TypeError) as exc:
             failure = phase
-            detail = safe_runtime_error(str(exc))
-            print('LIVE_FAILURE_DETAIL=' + detail, flush=True)
+            print('LIVE_FAILURE_CODE=' + live_failure_detail(exc), flush=True)
             if getattr(exc, 'diagnostic', ''):
                 print('LIVE_COMMAND_ERROR=' + safe_runtime_error(exc.diagnostic), flush=True)
         finally:
