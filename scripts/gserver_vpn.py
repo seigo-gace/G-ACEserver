@@ -29,6 +29,14 @@ ENDPOINT_CACHE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local
 TUNNEL_CREDENTIAL = 'cloudflared.credential'
 APP_RESOLV_FILE = 'app-resolv.conf'
 APP_RESOLV = 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'
+# Sidecar uses the Core image for Python only; do not inherit gserver :8765 healthcheck.
+APP_IDLE_COMMAND = ['python3', '-B', '-c', 'import time\nwhile True:\n time.sleep(3600)\n']
+APP_VPN_HEALTHCHECK = {
+    'test': ['CMD', 'python3', '-B', '-c',
+             'import urllib.request; urllib.request.urlopen('
+             "'http://127.0.0.1:8000/v1/publicip/ip', timeout=3).read(1)"],
+    'interval': '5s', 'timeout': '5s', 'retries': 12, 'start_period': '45s',
+}
 CLOUDFLARED_WAIT = ('while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; '
                     'while [ ! -f /run/gserver-tunnel/credential ]; do sleep 3600; done; '
                     'exec cloudflared tunnel --no-autoupdate run --token "$(cat /run/gserver-tunnel/credential)"')
@@ -400,6 +408,7 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
                             'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '30s'}},
         'app': {**read_only_sidecar, 'image': app_image, 'pull_policy': 'never', 'user': '65534:65534',
             'network_mode': 'service:vpn', 'depends_on': {'vpn': {'condition': 'service_healthy'}},
+            'command': APP_IDLE_COMMAND, 'healthcheck': APP_VPN_HEALTHCHECK,
             'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700']}},
         'configs': {'vpn_dns': {'file': './' + APP_RESOLV_FILE}}}
@@ -546,6 +555,76 @@ def wait_vpn_healthy(docker, container_id, timeout=150):
     raise VPNError('VPN_HEALTHCHECK_TIMEOUT', diagnostic=container_logs(docker, container_id))
 
 
+def service_runtime_state(docker, container_id):
+    raw = run(docker + ['inspect', container_id], step='inspect_service_state')
+    info = json.loads(raw)[0]
+    state = info.get('State', {})
+    health = state.get('Health') or {}
+    log_tail = []
+    for entry in (health.get('Log') or [])[-3:]:
+        if isinstance(entry, dict):
+            log_tail.append(sanitize_diagnostic(str(entry.get('Output', '')), limit=120))
+    return {
+        'running': state.get('Running'),
+        'status': state.get('Status'),
+        'exit_code': state.get('ExitCode'),
+        'health': health.get('Status'),
+        'failing_streak': health.get('FailingStreak'),
+        'health_log': log_tail,
+        'oom_killed': state.get('OOMKilled'),
+        'restarting': state.get('Restarting'),
+    }
+
+
+def service_logs(docker, container_id, tail=30):
+    try:
+        result = subprocess.run(
+            docker + ['logs', '--tail', str(tail), container_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except OSError:
+        return ''
+    return gluetun_log_summary(((result.stderr or '') + '\n' + (result.stdout or '')).strip(), limit=400)
+
+
+def project_runtime_diagnostics(docker, compose, project):
+    parts = []
+    for service in ('vpn', 'app', 'cloudflared'):
+        ids = run(compose + ['ps', '-q', service], step='compose_ps_' + service).split()
+        if len(ids) != 1:
+            parts.append(f'{service}_container=MISSING')
+            continue
+        cid = ids[0]
+        parts.append(f'{service}_state=' + json.dumps(service_runtime_state(docker, cid), sort_keys=True))
+        parts.append(f'{service}_logs=' + service_logs(docker, cid))
+    ps = subprocess.run(
+        compose + ['ps', '-a'],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    parts.append('compose_ps=' + sanitize_diagnostic((ps.stdout or ps.stderr or '').strip(), limit=400))
+    return sanitize_diagnostic('; '.join(parts), limit=1800)
+
+
+def classify_app_start_failure(docker, compose):
+    ids = run(compose + ['ps', '-q', 'app'], step='compose_ps_app_classify').split()
+    if len(ids) != 1:
+        return 'APP_CONTAINER_MISSING'
+    state = service_runtime_state(docker, ids[0])
+    if state.get('exit_code') not in (None, 0) and not state.get('running'):
+        return 'APP_CONTAINER_EXITED'
+    if state.get('health') == 'unhealthy':
+        return 'APP_HEALTHCHECK_UNHEALTHY'
+    if state.get('health') == 'starting':
+        return 'APP_HEALTHCHECK_TIMEOUT'
+    return 'APP_START_FAILED'
+
+
 def policy_fingerprint(report):
     # Counters change with packets; rule semantics must remain identical.
     def clean(value):
@@ -622,7 +701,28 @@ def start(directory):
                            'umask 077; cat > /run/gserver-tunnel/credential'], input=token.decode('ascii'))
         if 'app' in config['services']:
             ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120']
-            run(compose + ready + ['app'], step='compose_up_app_wait_healthy', timeout=150)
+            try:
+                run(compose + ready + ['app'], step='compose_up_app_wait_healthy', timeout=150)
+            except VPNError as exc:
+                code = classify_app_start_failure(docker, compose)
+                diag = project_runtime_diagnostics(docker, compose, manifest['project'])
+                merged = diag if not exc.diagnostic else exc.diagnostic + '; ' + diag
+                raise VPNError(code, diagnostic=merged) from exc
+    except VPNError as exc:
+        if created:
+            try:
+                extra = project_runtime_diagnostics(docker, compose, manifest['project'])
+            except VPNError:
+                extra = ''
+            try:
+                run(compose + ['stop', '--timeout', '10'])
+            except VPNError:
+                raise VPNError('START_FAILED_STOP_NOT_VERIFIED', diagnostic=extra or exc.diagnostic) from None
+            if extra and not exc.diagnostic:
+                raise VPNError(str(exc), diagnostic=extra) from exc
+            if extra and exc.diagnostic and extra not in exc.diagnostic:
+                raise VPNError(str(exc), diagnostic=exc.diagnostic + '; ' + extra) from exc
+        raise
     except BaseException:
         if created:
             try:

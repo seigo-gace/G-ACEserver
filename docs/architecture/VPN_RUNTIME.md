@@ -88,3 +88,5 @@ python3 -B scripts/smoke_gserver_vpn_live.py
 **read_only 責務:** Gluetun v3.41.3 は起動時に内部ユーザ作成で `/etc/passwd` へ書くため **vpn サービスだけ read_only 不可**。app/cloudflared は read_only のまま。書込みは tmpfs（`/tmp`, `/gluetun`, guard marker）と Gluetun 既定パスに限定され、nft guard・NET_ADMIN・非root app は維持。
 
 **Compose Config（Docker 5.6 / read_only app）:** read_only サービスへ inline `configs.content` は不可。**bundle 内 `app-resolv.conf` を `configs.file` で `/etc/resolv.conf` にマウント**。live smoke は `APP_RESOLV_CONF_APPLIED=PASS` で実マウントを確認する。
+
+**app sidecar:** Core digest image は Python 実行体のみ。gserver `:8765` healthcheck は継承しない。`command` は idle loop、healthcheck は共有 netns 内 `127.0.0.1:8000` Gluetun API 到達。`start()` 失敗時は cleanup 前に vpn/app State・Health・ログ・compose ps を sanitize して `VPNError.diagnostic` へ付与（`APP_HEALTHCHECK_*` / `APP_CONTAINER_EXITED` 等）。

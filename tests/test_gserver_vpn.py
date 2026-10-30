@@ -127,6 +127,14 @@ class VPNTests(unittest.TestCase):
         self.assertNotIn('eyJ', blob)
         self.assertIn('/run/gserver-tunnel/credential', blob)
 
+    def test_app_sidecar_idle_command_and_vpn_healthcheck(self):
+        out, _ = self.bundle()
+        config = json.loads((out / 'compose.json').read_text())
+        app = config['services']['app']
+        self.assertEqual(app['command'], vpn.APP_IDLE_COMMAND)
+        self.assertIn('127.0.0.1:8000', ' '.join(app['healthcheck']['test']))
+        self.assertNotIn('8765', json.dumps(app))
+
     def test_gluetun_vpn_not_read_only_app_sidecars_are(self):
         out, _ = self.bundle()
         config = json.loads((out / 'compose.json').read_text())
