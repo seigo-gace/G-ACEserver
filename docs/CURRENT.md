@@ -1,3 +1,15 @@
+# Current priority (2026-10-30 JST) — Gserver is a generic PC server, not a Telegram product
+
+**Master's latest scope:** Gserver on the user's Windows 11 / WSL Ubuntu PC provides Docker/Compose, independent app lifecycle, local API, G: Storage, safety/recovery and optional secure network egress. Telegram Bot and Tumblr are separate app projects, not Gserver Core features. TGserver is for logs/backup as an optional separate service, not a Bot runtime prerequisite. Never change the existing shared Webhook Gateway internals without Master's explicit service-owner instruction. Do not change Contabo/Astera or Astera-owned domains for Gserver. VPN is a design option to improve source-IP privacy, not a blanket requirement that blocks locally usable server functions.
+
+**Observed PC runtime (Master's terminal, 2026-10-30):** existing immutable gace-gserver-gserver-1 container healthy, 127.0.0.1:18765/health HTTP 200; G: mounted; Owner auth configured; authenticated /ready and /files HTTP 200. This is proof of existing local Core and Storage availability, not Windows reboot recovery, general app launch, remote ingress, backup restoration, or all F01-F08 acceptance. Preserve the running release, G:/F: originals, Docker volumes and pending Bot SQLite events.
+
+**Next immediate development:** complete the generic app Compose lifecycle independently of Core, validate one real app-owned Compose config on the PC, check Windows-side access and reboot startup separately without installing unapproved scheduled tasks, then close only those acceptance gates supported by real evidence. The new local-only app manager is scripts/gserver_apps.py; its isolated source/tests are in PR #15 and must not be represented as deployed. App start uses local images only and disallows privileged/host/public/external resources by default. No new Bot, gateway/TGserver route or Cloudflare dependency is required for normal local app hosting. KB/F04 and future commercial features remain deferred, not deleted.
+
+**Source/CI/Runtime distinction:** On branch chat/gserver-generic-app-runtime-20261030, new app controller and eight offline unit tests passed in the isolated CHAT test container. The user's PC has not yet fetched or executed that branch, and no genuine app was started/stopped by this change. Existing PC runtime remains the earlier verified immutable image. Do not pull/reset the user's existing local non-main working branch or overwrite Docker runtime merely to pick up this code.
+
+---
+
 # CURRENT｜G-ACEserver
 ## 2026-10-28 Master優先変更：KB停止、GserverをTG Bot受け皿+既存TGserver ZEROへ最速実装
 
