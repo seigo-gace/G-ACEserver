@@ -252,6 +252,16 @@ class VPNTests(unittest.TestCase):
             pins = vpn.endpoint_pins()
         self.assertEqual(set(pins), {'jp', 'kr'})
 
+    def test_empty_endpoint_cache_lists_are_unconfigured_not_invalid(self):
+        cache = self.root / 'endpoint-cache.json'
+        cache.write_text('{"jp": [], "kr": []}')
+        cache.chmod(0o600)
+        with mock.patch.object(vpn, 'ENDPOINT_CACHE', cache):
+            self.assertEqual(vpn.endpoint_pins(), {})
+            status = vpn.preflight(VPN_IMAGE)
+        self.assertEqual(status['endpoint_cache'], 'OK')
+        self.assertEqual(status['endpoint_pin_jp'], 'NOT_CONFIGURED')
+
     def test_preflight_reports_missing_local_image(self):
         with mock.patch.object(vpn, 'docker_access', return_value='OK'), \
              mock.patch.object(vpn, 'run', side_effect=vpn.VPNError('LOCAL_COMMAND_FAILED')):

@@ -180,9 +180,15 @@ def endpoint_pins():
             if region not in cache:
                 continue
             value = cache[region]
-            if not isinstance(value, str):
-                raise ValueError()
-            address = ipaddress.ip_address(value)
+            if isinstance(value, list):
+                if not value:
+                    continue
+                if len(value) != 1:
+                    raise ValueError()
+                value = value[0]
+            if not isinstance(value, str) or not value.strip():
+                continue
+            address = ipaddress.ip_address(value.strip())
             if address.version != 4 or not address.is_global:
                 raise ValueError()
             pins[region] = str(address)
@@ -232,13 +238,16 @@ def preflight(vpn_image, app_image=None, cloudflared_image=None):
         status['cloudflared'] = local_image_status(cloudflared_image, privilege)
     for region in REGIONS:
         status['endpoint_pin_' + region] = 'NOT_CONFIGURED'
-    try:
-        pins = endpoint_pins()
-        status['endpoint_cache'] = 'OK'
-        for region in pins:
-            status['endpoint_pin_' + region] = 'CONFIGURED'
-    except VPNError:
-        status['endpoint_cache'] = 'INVALID'
+    if ENDPOINT_CACHE.is_file():
+        try:
+            pins = endpoint_pins()
+            status['endpoint_cache'] = 'OK'
+            for region in pins:
+                status['endpoint_pin_' + region] = 'CONFIGURED'
+        except VPNError:
+            status['endpoint_cache'] = 'INVALID'
+    else:
+        status['endpoint_cache'] = 'MISSING'
     return status
 
 
