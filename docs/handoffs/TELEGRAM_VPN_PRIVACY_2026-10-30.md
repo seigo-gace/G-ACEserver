@@ -1,0 +1,66 @@
+# Gserver Telegram 送受信プライバシー強化｜Codex引継ぎ・検証台帳（2026-10-30 JST）
+
+**STATUS: DESIGN/HANDOFF ONLY — IMPLEMENTATION=NOT_EXECUTED; HOST_TEST=NOT_VERIFIED.**
+**Owner:** 既存 Gserver Current [Issue #9](https://github.com/seigo-gace/G-ACEserver/issues/9)、Codexの既存作業を尊重。別AIの新規起動を指示しない。
+**Scope:** GserverローカルWSL/Dockerと関連Telegram通信。既存F01-F08／46タスクを変更せず、F02/F06/F07/F08に横断するセキュリティ差分。Contaboおよび共有サービス提供元の変更は対象外。
+
+## 1. Mission / 確定インプット
+自宅IPのTelegramおよび関連外部宛先への不要な露出を最小化し、**送信・受信・ファイル送受信**を保護し、速度・安全性・復旧性能を実測で比較する。「VPN接続できた」は完成ではない。
+
+MasterがWindscribe Build A Plan の **日本 Tokyo - Shinkansen、韓国 Seoul - Hangang、無制限通信**を選択。手元で生成済みのファイル名:
+- `Windscribe-Tokyo-Shinkansen-WG.conf`
+- `Windscribe-Seoul-Hangang-WG.conf`
+
+**課金確定・ファイル所在・実際の設定内容・WireGuard接続状況は、この引継ぎでは未確認。** WireGuard秘密鍵、PresharedKey、Bot TokenをGitHub/チャット/CI/logへ絶対に出さない。PublicKeyも設定構造の調査に不要であれば共有を要求しない。秘密はCodexの既存ローカル権限内でのみ読取・安全な権限設定を行う。
+
+## 2. 重要な設計訂正
+「Cloudflare Tunnelなら受信対策完了」は誤り。Tunnelは原点への直接公開を回避する経路であり、Telegram webhook真正性・認証・容量上限・公開域分離は別責務。TelegramのWebhook受信と `getUpdates` long polling受信は異なる。また `getFile` API/URLからのファイル受信は外向きHTTPSなのでVPN出口側の保護が必要。
+- **Webhook受信**: Telegram → 所有権・用途承認済みのHTTPS入口 → 既存Tunnel/接続先 → Webhook認証・入力検証 → Bot。自宅直公開Port禁止。受信入口での公開URL・DNS・原点IP・TLS・認証・拒否応答・リプレイ/重複を検査。
+- **Long polling受信**: Bot → VPN → Telegram API → 同じVPN内応答。専用公開入口不要。既存方式を調査し勝手に変更しない。
+- **Bot API送信およびファイル送受信**: 対象Bot → 隔離Egress → WireGuard → Windscribe → Telegram API/ファイルホスト。直接WAN fallback禁止。
+- **内部通信**: LAN/DB/Storage/既存Gatewayに必要な限定経路を維持。外部一般通信の抜け道を作らない。
+
+**最優先の所有権制約**: server-core Rule Plane #17 (2026-10-30 現行) により、GserverのG-ACE側ドメインとAstera専用ドメインは別。既存Asteraゾーン、Tunnel、Gateway URLをGserver用途へ勝手に流用/変更/疎通送信しない。用途、正確なホスト名、影響に対してMasterの事前明示承認がないcross-zoneルートはFREEZE。既存のAstera資産を勝手に削除・再起動もしない。共有Webhook Gateway提供元の変更は別途明示承認が必要。Gserverへ許可された正規の受信入口を実測してから採用する。
+
+## 3. 実装の判断フロー（先に現物確認）
+1. Gserver Issue #9, `docs/CURRENT.md`, `docs/requirements/FINAL_ACCEPTANCE.md`, `docs/architecture/OVERVIEW.md`, `AGENTS.md` を読み、Codex既存変更/Worktree/Composeと所有者をread-only確認。CodexにはServer AI Rule #16を適用、CHAT用#17を負荷として渡さない。
+2. 実際に稼働するTelegram Bot・Webhook/long polling・送信API・メディア取得/アップロード・外部URL取得・DNS解決・ログ・内部依存を通信フロー表に全数登録する。別案件の5つのTelegram資産の統廃合や移動は承認しない。
+3. WSL2/Dockerの既存ネットワーク、IPv4/IPv6、NAT、Dockerブリッジ、host/コンテナFirewall、Tunnel ingress、プロキシ/環境変数を確認し、保護対象と非対象を分類する。
+4. 第一候補は**Telegram送受信処理を壊さない独立Docker VPN egress Gateway**、日本通常・韓国予備。隔離netns共有（`network_mode: service:...`）は候補の一つ。Webhook inboundと内部サービスの互換性が崩れる場合はproxy/egress router等の別方式を比較し、**Botが直WANへ迂回できない**ことを実証できる方式を採用する。
+5. Kill Switchをトンネル接続前に適用してDefault Deny。Windscribe VPNエンドポイントへの最小例外以外のWAN、DNS、IPv6、UDP、別インターフェースを遮断。例外が一般WANの抜け道にならないこと、DNS再解決/IP変更時の扱い、Docker再起動・WSL再起動の競合を試験。
+6. Webhook入口は既存契約に合致する正規経路を使う。Telegram `X-Telegram-Bot-Api-Secret-Token` の安全な照合、HTTPS、サイズ/頻度上限、秘密の非表示、`update_id` 冪等性、接続切断時の扱いをテスト。TelegramのWebhook送信元IP固定だけに認証を依存しない。
+7. 日本/韓国切替時は保護を解除せず、連続失敗/閾値/クールダウン/手動復旧を設け、切替前後に出口IPとルーティングをreadback。両方障害なら停止（fail closed）。切替自動化は実証・安全性確認後。
+8. Windows全体にVPNを有効化しない。既存C/D/F/Gドライブ、Windows/WSL配置、Docker Image/Volumeと現行Gserverを保護し、無断の移動、prune、削除、重い二重ランタイム導入を避ける。
+
+## 4. 受入試験と定量評価
+| ID | テスト | 合格条件 | 現在の証拠 |
+|---|---|---|---|
+| IN-01 | 実WebhookまたはPolling方式の列挙 | 実Bot毎に方式/Owner/入口を特定 | NOT_VERIFIED |
+| IN-02 | 正規Telegram Update受信 | 認証・重複排除・継続性が実動作 | NOT_VERIFIED |
+| IN-03 | Webhook偽造/不正Token/過大Body | 拒否・秘密非漏洩・原点直公開なし | NOT_VERIFIED |
+| IN-04 | Tunnel/入口停止・再開 | 自宅直公開fallbackなし・再同期成立 | NOT_VERIFIED |
+| OUT-01 | 日本WG接続 | 実外向きIPがWindscribe出口、API成功 | NOT_VERIFIED |
+| OUT-02 | 韓国WG接続 | 予備出口の実IP・API成功 | NOT_VERIFIED |
+| OUT-03 | DNS/IPv6 | VPN外問い合わせ/IPv6外向きが不可 | NOT_VERIFIED |
+| OUT-04 | VPN kill / 不成立 / 再起動 | 直接WAN成功0件、fail-closed | NOT_VERIFIED |
+| OUT-05 | Endpoint/DNS/Proxy/別NICの迂回試行 | 非許可WAN到達0件 | NOT_VERIFIED |
+| MEDIA-01 | getFile/送信メディア | ファイル取得とアップロードがVPN経由 | NOT_VERIFIED |
+| PERF-01 | baseline vs JP vs KR | p50/p95遅延、送受信速度、失敗率、CPU/RAM/MTUを複数回測定 | NOT_VERIFIED |
+| INTEG-01 | Tunnel inbound + VPN outbound | 両立し、既存Bot/Storage/内部API正常 | NOT_VERIFIED |
+| OPS-01 | Docker/WSL再起動・Rollback | IP非漏洩、キュー/永続データ保持 | NOT_VERIFIED |
+
+測定は対象経路・測定時刻・観測方法・使用出口・実際のRuntime出力を識別して残す。外部IPそのもの、自宅のネットワーク情報、秘密設定を**公開Repo**に載せない。性能閾値は基準値測定後に合理的に確定する。
+
+## 5. 過去の試験データと証拠の階層
+- **2026-10-30過去のCHAT内報告**: DebugAI隔離Branch `test/telegram-egress-isolation-20261030` の `tests/test_telegram_egress_isolation.py` および `tests/test_telegram_socks5_socket_probe.py` でオフライン模擬テスト（8/8、5/5 PASSとの過去報告）。**このGitHub引継ぎ作成時には再実行・commit/hash照合していない。過去報告扱い、実Host/WGの漏洩ゼロを示さない**。Source単体試験と実機試験を区別し、必要ならRepo内の実体を確認して再利用する。
+- **Gserver Issue #9 / CURRENT**: 既存Bot・Gateway・TGserver統合に関するSource/Runtimeの別証拠あり（個々の時点・範囲を保持）。今回のWindscribe導入の実接続証拠ではない。
+- この引継ぎ文書は **設計・テスト計画のGitHub保存**であり、VPNの購入/設定済み・Docker接続/漏洩試験成功の証明ではない。
+
+## 6. Codexへの具体的な引継ぎ
+既存Codexがこの文書を参照し、元のGserver Current/CUを再確認して**既存作業と競合しない単一Mutation Owner**を維持すること。既存Gserver作業を勝手に新しい「VPN専用Project」に移し替えない。Windows全体のWireGuard取り込みは実施せず、秘密設定ファイルはローカルに安全保管して利用する。
+
+進め方：read-only棚卸し → 既存設計差分確認 → 送受信経路を分離設計 → 隔離実装/テスト → 実VPNでJP/KR検証 → 意図的切断/漏洩検証 → 動画転送性能比較 → 許可された範囲で既存Botへ段階統合 → rollback/restart/readback → Issue #9 と `docs/CURRENT.md` にSource/CI/Host/Runtimeを分離して記録。
+
+**停止・承認境界**: Cloudflare別ゾーンの新利用/共有Gateway提供元変更/新公開面/秘密の境界変更など保護対象だけは明示承認なしに実行しない。他の通常開発と分離試験は継続する。GPT CHATからCodexへの追加起動は行っていない。
+
+**完了条件**: Telegram送信・受信・ファイル送受信の全実経路で保護を実証し、VPN断でも自宅IPへfallbackせず、既存Gserverへ支障を出さず、性能測定・復旧・rollback証拠を残す。未検証をPASSにしない。
