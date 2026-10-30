@@ -2,6 +2,8 @@
 !app/
 !app/gserver.py
 !app/storage.py
+!app/kb_source.py
+!app/tgs_bridge.py
 !app/index.html
 !app/ui.js
 !Dockerfile
