@@ -98,3 +98,43 @@ A/B/Cは論理的な所有・認証境界の識別子。**実Cloudflareアカウ
 5. `IN-DOM-05`: 新Domainを実採用する場合だけ、DNS/TLS/Tunnel/Access/Webhookの登録・切替・復旧を実証。現時点は未承認・未設定・未実測。
 
 **現在の実行状態**：GitHubへの設計引継ぎのみ。Cloudflare、Windows、WSL、Docker、Windscribe設定の変更、Codex新規起動、Runtime検証はいずれも実施していない。既存Gserver Current #9 と既存Codex主担当/Mutation Ownerを維持する。
+
+## 8. 2026-10-30 防御層・Libral Vault連携の必須設計（Masterの訂正）
+
+**訂正：従来の「VPN+Tunnel+Firewallだけ」の説明は保護範囲が不足。** 既存の自前暗号化・秘密情報管理の資産を含め、防御層ごとの目的・信頼境界・暗号化の有効範囲を明示する。今回の実装対象は**Gserver側の正式な利用口・設定・隔離・テスト**に限定し、共有Vault本体のSource・Runtime変更は無断で行わない。
+
+### 現物Sourceの確認内容（Runtime稼働は未確認）
+
+[Libral Vault README](https://github.com/seigo-gace/Libral-Vault/blob/main/README.md) に、単一Vaultモジュール、内部GPG部品、ACL/TTL、暗号化Secret保管、`useSecret` callback、暗号化Recovery Package、Key Rotation、署名/検証、Secretを返さずHTTP Providerへ投入する `POST /internal/v1/actions/http`、`/internal/v1/crypto/seal|unseal` 等の公式接続APIが記載される。**これらはSource記述であり、Gserverから到達可能か・接続済みか・使用許可があるかは未実測。** Vault内部GPGの直接操作・別Vault作成・Secret平文の外部配布は禁止。
+
+### どの防御を、どこへ適用するか
+
+| 防御層 | 防ぐ脅威・効果 | Gserver設計要件 |
+|---|---|---|
+| WireGuard | 自宅からの外向きトラフィックをVPN出口へ、経路上の通信を暗号化 | JP通常/KR予備、直接WAN fail closed、DNS/IPv6漏洩防止 |
+| TLS/HTTPS | Telegram API、Cloudflare ingress、正規内部サービスとの通信内容を経路上から保護 | 正しい証明書/hostname検証、認証済みTLS。WireGuardをTLS代用にしない |
+| Cloudflare Tunnel | 自宅への未許可のインターネット直接到達を減らす | Zone C/B/Aの所有権を保護し、Webhook真正性、origin遮断、callback先検証 |
+| Libral Vault | Secretの保存時暗号化・ACL/TTL・認証付き利用と復旧 | Bot Token、Cloudflare Token、Webhook Secret等の利用箇所を棚卸し。**利用可能な正規APIだけ**で連携し、Provider SecretをBotへ返さない経路を優先 |
+| Windows/WSL/Docker基盤 | アプリ突破時の権限横断・Host汚染 | 非root、capabilities制限、read-only rootfs、secret mount最小権限、network segmentation、更新/ログ/backup |
+| 保存・バックアップ暗号化 | 記録/動画/DB/復元パッケージが流出した場合の読取り | データ分類（秘密/個人情報/媒体/公開）に応じた保存時・バックアップ時の暗号化、署名/改ざん検知、復元テスト。既存VaultのCrypto契約に適合する範囲を確認し、巨大メディアを無条件にVaultへ通して性能を壊さない |
+| アプリ認証・入力検証 | Webhook偽装、SSRF、悪意あるメディア、リプレイ | Telegram secret_token、内部Service認証、ファイル形式/容量/リダイレクト制限、idempotency |
+| 可観測性・復旧 | 防御停止の見逃し、誤設定固定、鍵漏洩後の被害拡大 | 通信出口観測、denyログ、Vault health/権限拒否監視、秘密のマスキング、Rotation/restoreの実証 |
+
+### Vaultに関する設計時の必須の具体確認
+
+1. **所在・Trust Boundary**：Vaultの実Host/インスタンス、正式API/MCP、Runtime到達性、認証手段、Consumer ACL、zone/Project権限をread-onlyで確認。既存VaultがContabo上にある場合は、**本件のContabo利用禁止**に従い、遠隔呼出し前提の実装をしない。接続できない場合はGserverの既存ローカルSecret管理で安全側に保護し、既存契約の下で利用可能な正規連携案を比較する。**勝手にVault本体を複製・専用化・移設しない。**
+2. **守る対象**：WireGuard `PrivateKey`、Bot API Token、Webhook Secret、Cloudflare/Tunnel Credential、各種OAuth/DB/Backup鍵等を分類。どのSecretが誰の権限で、どの実行時に必要かと、起動・更新・復旧時にどこへ存在するかを図示する。
+3. **秘密の使用方法**：Vaultに認められたConsumerなら正式 `useSecret` 相当または `actions/http` 経由を優先。利用側が平文Secretを永続保存しない。WireGuardのようにローカルコンポーネントへ秘密鍵を渡す必要がある場合は、既存ローカル機密管理と権限・メモリ・一時ファイル・起動順・プロセス再起動を明確にし、`actions/http` でWireGuard接続できると誤解しない。
+4. **障害時挙動**：Vault不通／ACL拒否／鍵Rotation中に認証を無効化したり、平文env・公開ファイルへfallbackしたりしない。Botのキュー保存、停止範囲、復旧、鍵交換手順を定義。
+5. **暗号化の範囲**：保存時暗号化と転送時暗号化、署名/改ざん検知、匿名化は別の要件。TLSとVPNとVaultを重ねても、Telegramへの提供データ、Cloudflareで終端するHTTPS、VPN事業者の出口以後の宛先メタデータ、アカウント関連性は隠蔽できない。曖昧に「完全暗号化・匿名」とは記述しない。
+6. **過負荷/性能**：画像/動画すべてをVault APIで毎回暗号化することを既定にせず、既存データフロー・暗号化方式・容量制約を確認し、転送前後CPU/RAM/レイテンシ/アップロード時間を測定する。
+
+### 防御評価の追加受入項目
+
+- `CRYPTO-01`: 全SecretのOwner/保管先/消費主体/ログ露出を台帳化し、公開・平文残置・権限横断を拒否。
+- `CRYPTO-02`: **利用可能と実証された**正式Vault連携があれば、ACL/TTL/Secret非返却/health/鍵Rotation中を実試験。利用不可なら`VAULT_RUNTIME_NOT_AVAILABLE`とし、採用する代替の境界と残リスクを明記。
+- `CRYPTO-03`: 保存メディア/DB/Backupについて分類別の暗号化・復号権限・改ざん拒否・隔離Restoreを確認。
+- `CRYPTO-04`: Vault障害とVPN障害の複合状態で平文/直WAN fallbackが無く、通常受信・キュー保持・復帰が安全であることを実測。
+- `CRYPTO-05`: 単なる暗号ライブラリ導入やSource単体PASSではなく、Gserver実Runtimeの鍵使用・漏洩防止と、通信速度への影響を確認。
+
+**決定境界**：この追補で既存のVault利用が正式契約上可能なら利用を検討するが、Vault提供元の改修、既存利用者のSecret移行、Contabo接続、新たな公開API/権限拡大は許可しない。必要な場合は影響範囲と承認事項を分けてMasterへ具体案を提示する。
