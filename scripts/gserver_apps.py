@@ -104,6 +104,18 @@ def validate(file, name):
             raise AppError("COMPOSE_SERVICE_INVALID")
         if svc.get("build"):
             raise AppError("BUILD_NOT_ALLOWED")
+        logging = svc.get("logging", {}) or {}
+        if logging.get("driver") == "local":
+            # Docker local logging compresses rotated files by default. With
+            # max-file=1 it rejects container creation, before the process runs.
+            try:
+                options = logging.get("options", {}) or {}
+                count = int(options.get("max-file", "5"))
+                compress = str(options.get("compress", "true")).lower()
+                if count < 1 or compress not in ("true", "false") or (count == 1 and compress == "true"):
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise AppError("LOCAL_LOG_ROTATION_INVALID") from exc
         if svc.get("container_name") or svc.get("volumes_from") or svc.get("userns_mode") == "host":
             raise AppError("CROSS_PROJECT_CONTAINER_NOT_ALLOWED")
         if svc.get("privileged") or svc.get("pid") == "host" or svc.get("ipc") == "host":

@@ -1,3 +1,12 @@
+# 2026-10-31 追補｜独立app起動失敗の原因確定・修正
+
+- **原因確定（Master実機）:** Docker daemon/State.Error=`failed to initialize logging driver: compression cannot be enabled when max file count is 1`。検証用Composeのlocal loggingが既定圧縮ONのままmax-file=1だった。Python/app/認証/Volume故障ではなく、ログdriver初期化でprocess起動前に拒否されたことを確認。exit128/OOM=Falseと整合する。
+- **修正:** probeのlocal loggingをmax-size=1m/max-file=2へ変更し、容量上限・圧縮を維持。汎用app CLIもlocal driverの「圧縮ON + max-file=1」をverify段階で拒否し、同原因の再発を防止。既存Coreのloggingは元からmax-file=3であり変更不要。VPN rendererはmax-file=2であり今回の欠陥なし。
+- **検証:** 重点24 tests PASS、diff check PASS。圧縮ON/保存数1の拒否、保存数2/default・明示圧縮OFF/保存数1の許可を回帰確認。修正後の実app起動/共存/永続化/更新復帰はまだ未実測。Core/Storage/SQLiteの復帰PASS・spool2・他container不変は保持。
+- **Exact Next:** 同じWSL端末でsudo認証後、D側の `scripts/smoke_gserver_apps_host.py`だけ再実行。Core再起動・daemon設定変更・Firewall/capability緩和・image build/pullなし。実機PASS前にF02完了と記録しない。
+
+---
+
 # 2026-10-31 追補｜Master返却の電源断後受入・app exit128
 
 - **Master実機:** 20 app tests / 3 recovery tests PASS。同一端末sudo後、Core health、container Healthy、認証付きStorage ready/files、SQLite quick_checkすべてPASS、spool_rows=2。`current_recovery_checks=PASS`。Windows→WSL自動起動、電源断前後全データ比較、全体復元受入は従来どおり未証明。
