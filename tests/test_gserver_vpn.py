@@ -83,6 +83,7 @@ class VPNTests(unittest.TestCase):
             vpn.render(out,'jp',self.path,VPN_IMAGE,APP_IMAGE,'93.184.216.34')
         runtime=(out/'wireguard.conf').read_text()
         self.assertIn(KEY,runtime)
+        self.assertNotIn('DNS', runtime)
         self.assertNotIn('fd00::',runtime)
         self.assertNotIn('::/0',runtime)
         self.assertNotIn('vpn.example.com',runtime)
@@ -191,7 +192,8 @@ class VPNTests(unittest.TestCase):
                 if 'install' in cmd and fail_guard: raise vpn.VPNError('TEST_GUARD_FAILURE')
                 return json.dumps({'ok':True,'inode':2,'nft':{'nftables':[]}})
             if 'inspect' in cmd and 'image' not in cmd:
-                return json.dumps([{'State': {'Pid': 4242}, 'Config': {'Labels': {'com.docker.compose.project': manifest['project']}}}])
+                return json.dumps([{'State': {'Pid': 4242, 'Running': True, 'Health': {'Status': 'healthy'}},
+                                    'Config': {'Labels': {'com.docker.compose.project': manifest['project']}}}])
             return ''
         def namespace(path, *args, **kwargs):
             return types.SimpleNamespace(st_ino=1 if str(path)=='/proc/1/ns/net' else 2)

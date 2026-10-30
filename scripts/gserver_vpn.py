@@ -17,6 +17,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import time
 
 REGIONS = {'jp': 'Windscribe-Tokyo-Shinkansen-WG.conf',
            'kr': 'Windscribe-Seoul-Hangang-WG.conf'}
@@ -352,6 +353,9 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
     runtime['Interface']['Address'] = ', '.join(x.strip() for x in runtime['Interface']['Address'].split(',') if ipaddress.ip_interface(x.strip()).version == 4)
     runtime['Peer']['AllowedIPs'] = '0.0.0.0/0'
     runtime['Peer']['Endpoint'] = selected + ':' + str(p['port'])
+    # DNS belongs in the app resolv.conf after Gluetun is up; pre-tunnel DNS in wg0.conf
+    # can make Gluetun probe unreachable resolvers while the nft guard is strict.
+    runtime['Interface'].pop('DNS', None)
     import io
     stream = io.StringIO()
     runtime.write(stream)
@@ -376,7 +380,9 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
             'entrypoint': ['/bin/sh', '-ec', 'while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; exec /gluetun-entrypoint'],
             'environment': {'VPN_SERVICE_PROVIDER': 'custom', 'VPN_TYPE': 'wireguard',
                 'VPN_INTERFACE': 'tun0', 'FIREWALL': 'on', 'HTTPPROXY': 'off',
-                'SHADOWSOCKS': 'off', 'LOG_LEVEL': 'warn'},
+                'SHADOWSOCKS': 'off', 'DOT': 'off', 'UPDATER_PERIOD': '0',
+                'BLOCK_MALICIOUS': 'off', 'BLOCK_SURVEILLANCE': 'off', 'BLOCK_ADS': 'off',
+                'LOG_LEVEL': 'warn'},
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m', '/gluetun:rw,nosuid,nodev,size=16m',
                       '/run/gserver-guard:rw,noexec,nosuid,nodev,size=1m,mode=0700'],
             'healthcheck': {'test': ['CMD', '/bin/sh', '-ec',
@@ -477,6 +483,43 @@ def namespace_guard(pid, rules=None):
     return result
 
 
+def container_logs(docker, container_id, tail=40):
+    try:
+        result = subprocess.run(
+            docker + ['logs', '--tail', str(tail), container_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except OSError:
+        return ''
+    return sanitize_diagnostic(((result.stderr or '') + '\n' + (result.stdout or '')).strip(), limit=800)
+
+
+def wait_vpn_healthy(docker, container_id, timeout=150):
+    """Wait for the bootstrap VPN container without a second compose up (avoids recreate)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = json.loads(run(docker + ['inspect', container_id], step='inspect_vpn_wait'))[0]
+        state = info.get('State', {})
+        if not state.get('Running'):
+            exit_code = state.get('ExitCode', '?')
+            logs = container_logs(docker, container_id)
+            raise VPNError(
+                'VPN_CONTAINER_EXITED',
+                diagnostic=sanitize_diagnostic(f'exit_code={exit_code}; {logs}'),
+            )
+        health = state.get('Health') or {}
+        status = health.get('Status')
+        if status == 'healthy':
+            return
+        if status == 'unhealthy':
+            raise VPNError('VPN_HEALTHCHECK_FAILED', diagnostic=container_logs(docker, container_id))
+        time.sleep(2)
+    raise VPNError('VPN_HEALTHCHECK_TIMEOUT', diagnostic=container_logs(docker, container_id))
+
+
 def policy_fingerprint(report):
     # Counters change with packets; rule semantics must remain identical.
     def clean(value):
@@ -527,8 +570,11 @@ def start(directory):
             input=wireguard.decode('ascii'), step='docker_exec_wireguard_conf')
         run(docker + ['exec', ids[0], '/bin/sh', '-ec', 'touch /run/gserver-guard/ready'],
             step='docker_exec_guard_ready')
-        ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120']
-        run(compose + ready + ['vpn'], step='compose_up_vpn_wait_healthy', timeout=150)
+        wait_vpn_healthy(docker, ids[0], timeout=150)
+        info = json.loads(run(docker + ['inspect', ids[0]], step='inspect_vpn_post_ready'))[0]
+        pid = info['State']['Pid']
+        if not isinstance(pid, int) or pid <= 1:
+            raise VPNError('VPN_NAMESPACE_INVALID')
         # Verify independent guard survived the VPN's own firewall setup before
         # giving any application access to this network namespace.
         current = namespace_guard(pid)
@@ -548,6 +594,7 @@ def start(directory):
             run(docker + ['exec', '-i', tunnel_ids[0], '/bin/sh', '-ec',
                            'umask 077; cat > /run/gserver-tunnel/credential'], input=token.decode('ascii'))
         if 'app' in config['services']:
+            ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120']
             run(compose + ready + ['app'], step='compose_up_app_wait_healthy', timeout=150)
     except BaseException:
         if created:
