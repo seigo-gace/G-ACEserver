@@ -146,8 +146,39 @@ def main():
             operate("status", names[0])
             operate("logs", names[0])
             print("APP_CONFIG_UPDATE_ROLLBACK=PASS", flush=True)
-        except (apps.AppError, OSError, ValueError, KeyError, TypeError):
+        except (apps.AppError, OSError, ValueError, KeyError, TypeError) as exc:
             failure = phase
+            # No ordinary app logs/configuration are dumped. These are our own
+            # random synthetic projects, created only after collision guards.
+            code = str(exc) if isinstance(exc, apps.AppError) else type(exc).__name__
+            if apps.re.fullmatch(r"[A-Z_]+", code):
+                print("APP_FAILURE_DETAIL=" + code, flush=True)
+            if phase in ("APP_START", "STOP_ISOLATION", "UPDATE_ROLLBACK"):
+                for name in created:
+                    try:
+                        ids = docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + apps.project(name)).split()
+                        for container_id in ids:
+                            row = json.loads(docker("inspect", container_id))[0]
+                            if row.get("Config", {}).get("Labels", {}).get("com.docker.compose.project") != apps.project(name):
+                                continue
+                            state = row.get("State", {})
+                            print("PROBE_EXIT_CODE=" + str(int(state.get("ExitCode", -1))))
+                            print("PROBE_OOM_KILLED=" + str(bool(state.get("OOMKilled", False))))
+                            # Only classified error types, never paths/tokens.
+                            log = docker("logs", "--tail", "20", container_id)
+                            for error in ("PermissionError", "FileNotFoundError", "SyntaxError", "Read-only file system", "ModuleNotFoundError"):
+                                if error in log:
+                                    print("PROBE_PROCESS_ERROR=" + error.replace(" ", "_"))
+                    except (apps.AppError, ValueError, KeyError, TypeError):
+                        print("PROBE_DIAGNOSTIC=UNAVAILABLE")
+                diagnostic = getattr(exc, "diagnostic", "").lower()
+                for fragment, reason in (("permission denied", "PERMISSION_DENIED"),
+                        ("no such image", "LOCAL_IMAGE_MISSING"), ("unhealthy", "HEALTHCHECK_FAILED"),
+                        ("read-only file system", "READ_ONLY_FILESYSTEM"),
+                        ("invalid mount", "MOUNT_REJECTED"), ("exited", "PROCESS_EXITED"),
+                        ("cannot allocate memory", "MEMORY_UNAVAILABLE"), ("no space left", "DISK_FULL")):
+                    if fragment in diagnostic:
+                        print("PROBE_DOCKER_REASON=" + reason)
         finally:
             for name in reversed(created):
                 try:

@@ -2,7 +2,7 @@
 
 > **Status: local Core / authentication / G: Storage verified by owner; generic app runtime acceptance pending.**
 
-Gserver is a general-purpose Docker/Compose server on the owner's Windows PC / WSL Ubuntu. Independent apps own their code, images, Compose definitions and data. Telegram Bot and Tumblr are app examples; TGserver provides separate logging/backup services. Normal local operation needs no GitHub, Gateway, Cloudflare or VPN connection.
+Gserver is a general-purpose Docker/Compose server on the owner's Windows PC / WSL Ubuntu. Independent apps own their code, images, Compose definitions and data. Telegram Bot and Tumblr are app examples; TGserver provides separate logging/backup services. Local Core/Storage operation needs no GitHub or external service. Protected app egress and cloudflared connections require VPN routing, preserved Cloudflare defenses, and verified privacy/performance/recovery gates; see [reviewed privacy design](docs/handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md) and [implementation](docs/architecture/VPN_RUNTIME.md).
 
 The existing Core and Storage remain running. [PR #15](https://github.com/seigo-gace/G-ACEserver/pull/15) adds the independent app CLI; see [app operation and acceptance](docs/architecture/APPS_RUNTIME.md) and [current evidence](docs/CURRENT.md). Management uses the existing VS Code/Cursor WSL terminal. The full [F01–F08 acceptance](docs/requirements/FINAL_ACCEPTANCE.md) remains open.
 

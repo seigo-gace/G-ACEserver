@@ -122,7 +122,7 @@
 | R03 / 必須 | 独自WG/Firewallを一式新作すると防御の再実装・起動窓・更新保守を増やす | 既存実装Gluetunのcustom WireGuard/Firewallを採用候補として再利用し、**image digest固定・実機負試験を採用条件**にする。公式Source仕様を確認した段階であり、image取得/稼働済みとはしない。HTTP/SOCKS proxyは有効化しない |
 | R04 / 必須 | netns共有はresolv.conf共有ではない。Docker DNSがHostへ迂回し得る | app/connectorへVPN内DNSだけを指す専用resolv.confをread-only適用。IPv6はまず当該namespaceで無効化し、IPv6対応は漏洩試験付き別差分。Host/WindowsのDNS・IPv6は変更しない |
 | R05 / 必須 | 同じWG PrivateKeyをJP/KR/複数gatewayで同時利用すると接続先が競合し得る | 1保護グループ1稼働VPN、JP/KRは順次切替。切替中はapp/connector停止→旧namespace停止→新設定で再作成→安全確認→app/connector再作成。別グループへの同一credential同時利用は不許可。初期は手動の管理された切替とし、不明な自動切替は実装しない |
-| R06 / 必須 | 設定ファイルのhooks・DNS/Endpoint解決・平文環境変数が秘密/実行境界になる | WireGuardは指定2プロファイル、サイズ/regular-file/no-follow/所有者/0600と構文を検証。shell hooks/SaveConfig/Table/任意unknown項目を拒否し、Endpointはpublic IPv4 literalのみ。秘密鍵はfile bindのみ、env/argv/Compose本文/出力に埋め込まない。JP/KRとも存在未確認の状態を接続可としない |
+| R06 / 必須 | 設定ファイルのhooks・DNS/Endpoint解決・平文環境変数が秘密/実行境界になる | WireGuardは指定2プロファイル、サイズ/regular-file/no-follow/所有者/0600と構文を検証。shell hooks/SaveConfig/Table/任意unknown項目を拒否し、Endpointはpublic IPv4 literalのみ。秘密鍵はprivate file→stdin→専用tmpfs（R13）で渡し、env/argv/Compose本文/出力に埋め込まない。JP/KRとも存在未確認の状態を接続可としない |
 | R07 / 必須 | VPN宛先許可だけでは正規APIへの不正持出しを防げない | app側chat/機能/送信量・媒体制約、replay/SSRF/処理上限は**app所有側の契約Gate**。Gserver側のnetwork保護と別判定。別appのSource変更や新Botの作成は行わない |
 | R08 / 必須 | VaultへのHTTP利用でWG秘密鍵を返せるという前提は正式契約に反する可能性 | VaultはProvider Secret非返却の設計。WireGuardローカル鍵の供給/更新は認可済み契約が確認できるまで既存private-file方式を保持。別Vault/平文envへ置換しない。VaultがContaboのみなら今回接続しない |
 | R09 / 必須 | 「速度低下なし」に数値・比較条件が未確定 | 基準baseline・対象サイズ/回数/負荷・必要throughput・p95/p99上限・誤差を計測前に記録し固定。未入力/未測定はPERFORMANCE=NOT_VERIFIED、閾値緩和や防御解除で合格にしない。メディアのサイズ上限やCloudflare契約上限も実契約で照合 |

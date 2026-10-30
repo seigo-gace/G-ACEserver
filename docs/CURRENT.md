@@ -1,3 +1,17 @@
+# 2026-10-31 Codex｜電源断後の確認・D側編集元統一・通信保護設計レビューと実装
+
+- **Owner/場所:** 本対話のCodexが継続。G側旧copyとD側WSL ext4のHEAD/branch/clean一致を実測後、D側を唯一の編集元へ固定。G側は無変更で保護。D側だけ新しいdesign/sourceを持つため、以後G側で実装/commitしない。Cursorは起動中で既存のWindows配置にjunctionなし。認証/履歴/GUI完全切替は未受入、live User Data移動/再導入は実施しない。
+- **電源断実測:** Windows起動と、その後の別時刻のWSL bootを確認。Docker/containerdはactive/enabled、Core loopback health 200。これは現在の部分復帰でありWindows→WSLの自動復帰を証明しない。現在の本人sudo cacheが使えず、認証付きStorage/SQLite quick_checkの追加読戻しはNOT_VERIFIED。電源断前fingerprintがないので全データ一致をPASSにしない。Core/Storage/Volume/Spoolを変更していない。
+- **実装前レビュー:** 指定design branch `84aa6908`の文書を取得し、R01〜R13を統合。[レビュー済み正本](handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)のdesign commits `cbcd0dd`/`448f545`/`fe02401`/`e85efa7`を実装より先に保存。F01〜F08/46タスク維持。対象appとcloudflaredのVPN経由/IP秘匿を必須とし、Cloudflare防御、Vault契約、速度/攻撃隔離/復旧を維持。Contabo不使用。他app/共有提供元を変更しない。
+- **実設定:** Master指定DesktopのJP/KR両profileを確認、原本を残しWSL private stateへ0600で安全に保存。両方の鍵形式・構文検証PASS。実設定はdual-stack+hostnameのため原本をIPv4に書き換えず、別runtime設定へ変換する。endpoint自動DNSを避け、明示public IPv4 pinを必須にした。既存Windows DNS cacheの一致A recordは0件で、新しい外部DNS問い合わせは実行していない。秘密鍵/実endpoint/アカウント情報はGit/出力に含めない。両地域の接続/出口IPはNOT_VERIFIED。
+- **Source実装:** [VPN_RUNTIME](architecture/VPN_RUNTIME.md)参照。`gserver_vpn.py`にprivate profile検証・immutable image構成生成・guard先行namespace起動・hash再照合・失敗時の当該project stopを追加。独自VPN製品を作らずGluetunとLinux nftablesを利用。全cap dropのappにNET_ADMINを渡さず、秘密はstdin→VPN tmpfs、DNSはinline read-only config。新規image build/pullなし、本番VPN/Cloudflare設定は未実施。
+- **現段階の実装限界:** rendererはVPN+appの足場。cloudflared実組込、実Bot契約/Token/永続data、公開入口/ドメイン/Access/WAF/正式Vault接続、JP/KR実接続・kernel漏洩/攻撃/復元・速度Gateは未受入。endpoint pinと監査済みlocal image digestが揃うまで実VPN起動はしない。構成解析や模擬テストを秘匿済み/性能合格と呼ばない。
+- **前回app失敗の扱い:** Master実行20 tests PASS、実probe `APP_SMOKE_APP_START` FAIL、cleanup後Core/Storage/他container不変PASSを採用。原因はまだ未確定。失敗時のsafe detail、合成container exit/OOM・例外分類・Docker理由をcleanup前に取得する修正を追加。認証拒否と起動失敗を混同しない。
+- **検証:** 全回帰226件PASS。VPN重点20件、復旧3件、既存app20件を含む（追加network拒否テスト後のVPN重点は21件PASS）。実Composeで保護構成/inline DNS/秘密非混入のconfig解析PASS。shell syntax/diff check PASS。kernel nftables/WireGuard/実VPN・CF/TG/Vault接続・CI・本番配置はNOT_VERIFIED。ローカルhealth30サンプルとG/D Git操作時間をprivate receiptに保存したが、VPN性能比較/正式速度Gateの合格ではない。
+- **次の実機確認:** D側既存checkoutで `bash scripts/verify_gserver_resume.sh`。同一端末sudo認証→Owner Storage/SQLite読戻し→修正済み2app probeと安全な診断/cleanupを一括実行。Host/Windows設定・Core再起動をしない。VPNは別のisolated接続Gateで検証する。GUI/Windows Cursor移設は依存・停止/復旧の確認前に行わない。全体F01〜F08は未完了。
+
+---
+
 # 2026-10-30 Codex｜汎用アプリ管理の統合・保護修正（F02/S2、F07）
 
 - **目的・優先:** [Master訂正](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6513092077)と原F01〜F08を照合。既存Core/認証/G: Storage PASSを維持し、独立Composeアプリ→共存・復旧→Windows起動継続性→Storage未受入保護→F04/F05→F08の順で進める。詳細な操作・復旧は [APPS_RUNTIME](architecture/APPS_RUNTIME.md)。

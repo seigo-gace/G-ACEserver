@@ -32,3 +32,7 @@ node_modules/
 *.vhdx
 .DS_Store
 Thumbs.db
+# WireGuard profiles/runtime bundles contain private keys; keep outside Git
+Windscribe-*-WG.conf
+wireguard.conf
+vpn-bundles/
