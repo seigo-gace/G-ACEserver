@@ -1,3 +1,12 @@
+# 2026-10-31 Cursor Composer｜F01/F03/F04 読取専用Gate
+
+- **実装:** `audit_f01_wsl_boot.py`（WSL `[boot] systemd`・systemd unit・`sudo -n docker info`）、`windows_f01_boot_readonly.ps1`（WSL直呼びScheduledTask件数のみ）、`f03_storage_mount_audit.py`（G: mount fingerprint・quota snapshot・USB断試験はNOT_RUN）、`gserver_f04_readiness.py`（mount probe + `kb_source.inspect`）。`verify_gserver_resume.sh` に3 WSL auditを追加。契約テスト9件追加。
+- **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **255 tests PASS**（Composer shell、CI未実行）。
+- **Composer実測（区分）:** F03 mount audit **VERIFY=PASS**（G: mounted、quota OK）。F04 **VERIFY=FAIL**（`/mnt/f` 未mount、想定内）。F01 **VERIFY=FAIL**（Composer shellはsudo cacheなしでdocker拒否；`verify_gserver_resume.sh` は `sudo -v` 後なのでMaster端末ではPASS想定）。Windows F01 PS1は**未実行**。
+- **Exact Next:** Master端末で `verify_gserver_resume.sh` 一括→必要なら `windows_f01_boot_readonly.ps1`。F: ro mount後 `gserver_f04_readiness.py` / `gserver_kb.py --verify-hashes`。Gluetun/cloudflared pull/build・実Bot Tokenは保留。F01〜F08全体未完了。
+
+---
+
 # 2026-10-31 Cursor Composer｜Issue #9 / PR #15 引継ぎ・実装継続
 
 - **引継ぎ:** [Issue #9 2026-10-31 Composer指示](https://github.com/seigo-gace/G-ACEserver/issues/9)とPR #15（logging修正 `d38e5fc`、VPN namespace helper・R14）をD側 `/home/gace/Project/Gserver/repository` で受領。編集元はD側ext4のみ。G側 `/mnt/g/Project/Gserver/repository` は触らない。Core loopback `/health` 200をComposer shellで確認。
@@ -5,7 +14,7 @@
 - **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **238 tests PASS**（VPN helper/guard smoke offline含む）。CI未実行。
 - **Runtime（Master端末 2026-10-31）:** recovery readback PASS。**2app generic smoke VERIFY=PASS**（`PROBE_PRIVATE_SUCCESS=SAVED`）。**namespace guard kernel smoke VERIFY=PASS**（peer canary baseline、loopback許可、guard後peer遮断、drop counter増加、Core/Storage/他container不変）。WireGuard/WAN/Cloudflareは未試験どおり。R14のkernel実証Gateは**この範囲で受入済み**（JP/KR接続・漏洩・速度・cloudflared統合は未受入）。
 - **C/D:** FINAL_ACCEPTANCEどおりC=Windows最小・D HDD上WSL ext4をLinux実行元。recovery baselineでD側git status中央値≈3.5ms、G旧copy≈221ms（read-only receipt）。無断WSL移設・Cursor User Data移動・Docker prune/build/pull禁止を維持。
-- **Git（2026-10-31）:** ローカル `4b3ebed`（R14+kernel smoke+文書）までcommit済み。**PushはWSL側GitHub HTTPS認証未設定のためComposerから未完了**（`ahead 2+`）。Master端末で `git push origin chat/gserver-generic-app-runtime-20261030` を実行すればPR #15更新。続くcommitで cloudflared統合・preflight・接続準備レポートを追加予定。
+- **Git（2026-10-31）:** `chat/gserver-generic-app-runtime-20261030` を **GitHubへpush済み**（`d38e5fc`→**`e407a49`**）。PR #15 head=`e407a49`、Draft維持。SSH `git@github.com` 経由。
 - **Exact Next:** `gserver_vpn.py preflight` でlocal pinned image有無のみ確認（pull/buildなし）。bundle `render`（cloudflared optional）→ `gserver_connection_readiness.py` で slot 確認→実鍵/Token投入は `WAIT_REAL_CONNECTION`。F01/F03/F04/F05/F08は独立可能範囲を継続。F01〜F08全体未完了。
 
 ---
