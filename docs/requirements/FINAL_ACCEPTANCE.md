@@ -1,5 +1,9 @@
 # Gserver 最終完成条件｜F01～F08
-文書状態：GOAL FIXED / RUNTIME NOT VERIFIED。
+文書状態：GOAL FIXED / CORE・STORAGE一部実機PASS / 全体受入未完了。
+
+## 2026-10-30 目的・受入の補正
+
+Gserverは独立アプリを運用する汎用Compose Host。Telegram Bot/Tumblrの機能とGserver基盤、TGserverのログ/バックアップ責務を分離する。F02の直近受入は個別アプリの起動・停止・状態/ログ・共存・永続化・更新/復旧。既存Core/認証/G:マウントとStorage ready/filesはOwner実機PASS。独立アプリとWindows→WSL→Docker復帰は未受入。Gateway/TGS、Cloudflare、送信元IP秘匿用VPNをローカル利用の必須依存にしない。基本利用開始とF01〜F08全体完成を別判定とし、後段のF04/F05・障害復元要件も維持する。
 
 ## Master運用・保存先の確定補正（2026-10-28）
 

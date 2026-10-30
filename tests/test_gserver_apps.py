@@ -74,4 +74,75 @@ class AppTests(unittest.TestCase):
             with self.assertRaisesRegex(a.AppError, '^DOCKER_COMMAND_FAILED$'):
                 a.run(['docker','info'])
 
+    def test_explicit_names_cannot_share_core_or_another_app_resources(self):
+        for key in ('networks', 'volumes'):
+            for name in ('gace-gserver_state', 'gace-app-other_state'):
+                with self.subTest(key=key, name=name), self.assertRaisesRegex(a.AppError, 'CROSS_PROJECT'):
+                    self.config({'services': {'web': {}}, key: {'state': {'name': name}}})
+            self.config({'services': {'web': {}}, key: {'state': {'name': 'gace-app-sample_state'}}})
+
+    def test_volume_driver_cannot_mount_host_data(self):
+        for props in ({'driver': 'nfs'}, {'driver': 'local', 'driver_opts': {'type': 'none', 'device': '/', 'o': 'bind'}}):
+            with self.subTest(props=props), self.assertRaisesRegex(a.AppError, 'RESOURCE_DRIVER'):
+                self.config({'services': {'web': {}}, 'volumes': {'state': props}})
+
+    def test_bind_paths_confined_to_app_directory(self):
+        for path in ('/', '/var/run', '/etc', '/mnt/f', '/mnt/g'):
+            with self.subTest(path=path), self.assertRaises(a.AppError):
+                self.config({'services': {'web': {'volumes': [{'type': 'bind', 'source': path}]}}})
+        link = Path(self.tmp.name) / 'host'
+        link.symlink_to('/etc', target_is_directory=True)
+        with self.assertRaises(a.AppError):
+            self.config({'services': {'web': {'volumes': [{'type': 'bind', 'source': str(link)}]}}})
+        self.config({'services': {'web': {'volumes': [{'type': 'bind', 'source': str(self.file)}]}}})
+
+    def test_privileged_hooks_and_provider_are_rejected(self):
+        for props in ({'post_start': [{'command': 'x', 'privileged': True}]},
+                      {'provider': {'type': 'external'}}, {'use_api_socket': True},
+                      {'uts': 'host'}, {'cgroup': 'host'}, {'runtime': 'custom'},
+                      {'volumes': [{'type': 'image', 'source': 'registry/image'}]},
+                      {'pid': 'service:other'}, {'ipc': 'container:core'},
+                      {'deploy': {'resources': {'reservations': {'devices': [{'capabilities': ['gpu']}]}}}}):
+            with self.subTest(props=props), self.assertRaises(a.AppError):
+                self.config({'services': {'web': props}})
+
+    def test_secret_and_config_cannot_reference_protected_files(self):
+        for key in ('secrets', 'configs'):
+            with self.subTest(key=key), self.assertRaises(a.AppError):
+                self.config({'services': {'web': {}}, key: {'key': {'file': '/etc/passwd'}}})
+
+    def test_execution_uses_validated_snapshot_and_preserves_literal_dollars(self):
+        config = {'services': {'web': {'image': 'local', 'environment': {'KEY': '$$PRIVATE'}}}}
+        snapshots = []
+        def run(cmd, **kwargs):
+            if 'config' in cmd:
+                return json.dumps(config)
+            path = Path(cmd[cmd.index('-f') + 1])
+            self.assertNotEqual(path, self.file)
+            self.assertEqual(json.loads(path.read_text())['services']['web']['environment']['KEY'], '$$PRIVATE')
+            self.assertEqual(cmd[cmd.index('--project-directory') + 1], str(self.file.parent))
+            snapshots.append(path)
+            return ''
+        with mock.patch.object(a, 'run', side_effect=run):
+            a.execute('start', self.file, 'sample')
+        self.assertTrue(snapshots)
+        self.assertFalse(snapshots[0].exists())
+
+    def test_failed_start_removes_secret_snapshot(self):
+        snapshots = []
+        def run(cmd, **kwargs):
+            if 'config' in cmd:
+                return json.dumps({'services': {'web': {}}})
+            snapshots.append(Path(cmd[cmd.index('-f') + 1]))
+            raise a.AppError('DOCKER_COMMAND_FAILED')
+        with mock.patch.object(a, 'run', side_effect=run), self.assertRaises(a.AppError):
+            a.execute('start', self.file, 'sample')
+        self.assertFalse(snapshots[0].exists())
+
+    def test_status_does_not_print_unknown_service_or_untrusted_state(self):
+        for row in ({'Service': 'unknown', 'State': 'running'}, {'Service': 'web', 'State': 'secret'}):
+            with mock.patch.object(a, 'run', side_effect=[json.dumps({'services': {'web': {}}}), json.dumps(row)]):
+                with self.assertRaisesRegex(a.AppError, 'STATUS_FORMAT_INVALID'):
+                    a.execute('status', self.file, 'sample')
+
 if __name__ == '__main__': unittest.main()

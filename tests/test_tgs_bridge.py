@@ -1,16 +1,19 @@
 """Gserver Bot -> durable spool -> existing Gateway TGserver ZERO lane."""
 import json
+import threading
+import time
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 import urllib.error
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID,
-                        gateway_endpoint, envelope, flush_once, send_gateway,
-                        validate)
+from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID, MAX_ATTEMPTS,
+                        _NoGatewayRedirect, gateway_endpoint, envelope, flush_once,
+                        send_gateway, validate)
 
 
 def sample():
@@ -119,6 +122,194 @@ class TgsBridgeTests(unittest.TestCase):
                 gateway_endpoint(url)
         self.assertEqual(gateway_endpoint("https://gateway.example"), "https://gateway.example/internal/events")
 
+    def test_gateway_config_lock_blocks_parallel_reader_until_writer_finishes(self):
+        from tgs_bridge import gateway_configuration_lock
+        folder = self.folder / "config"
+        folder.mkdir(mode=0o700)
+        reader_started = threading.Event()
+        reader_finished = threading.Event()
+        def reader():
+            reader_started.set()
+            with gateway_configuration_lock(folder, shared=True):
+                reader_finished.set()
+        with gateway_configuration_lock(folder, shared=False):
+            task = threading.Thread(target=reader)
+            task.start()
+            self.assertTrue(reader_started.wait(1))
+            self.assertFalse(reader_finished.wait(0.05))
+        self.assertTrue(reader_finished.wait(1))
+        task.join(timeout=1)
+        self.assertFalse(task.is_alive())
+
+    def test_gateway_config_lock_refuses_symlink_and_world_readable_lock(self):
+        from tgs_bridge import gateway_configuration_lock
+        folder = self.folder / "config"
+        folder.mkdir(mode=0o700)
+        lock = folder / "gateway-config.lock"
+        lock.symlink_to(self.folder / "target")
+        with self.assertRaises((BotEventError, OSError)):
+            with gateway_configuration_lock(folder):
+                pass
+        lock.unlink()
+        lock.write_text("already here")
+        lock.chmod(0o644)
+        with self.assertRaises(BotEventError):
+            with gateway_configuration_lock(folder):
+                pass
+
+    def test_access_headers_are_optional_and_require_private_complete_pair(self):
+        from tgs_bridge import gateway_access_headers
+        id_file = self.folder / "cf-id"
+        secret_file = self.folder / "cf-secret"
+        self.assertEqual(gateway_access_headers(id_file, secret_file), {})
+        id_file.write_text("testclientid1234")
+        id_file.chmod(0o600)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+        secret_file.write_text("testsecretvalue1234")
+        secret_file.chmod(0o600)
+        self.assertEqual(gateway_access_headers(id_file, secret_file), {
+            "CF-Access-Client-Id": "testclientid1234",
+            "CF-Access-Client-Secret": "testsecretvalue1234",
+        })
+        secret_file.chmod(0o644)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+        secret_file.chmod(0o600)
+        id_file.unlink()
+        id_file.symlink_to(secret_file)
+        with self.assertRaises(BotEventError):
+            gateway_access_headers(id_file, secret_file)
+
+    def test_access_credentials_are_separate_from_gateway_bearer(self):
+        from tgs_bridge import gateway_access_headers
+        cf_id = self.folder / "cf-id"
+        cf_secret = self.folder / "cf-secret"
+        cf_id.write_text("testclientid1234")
+        cf_secret.write_text("testsecretvalue1234")
+        cf_id.chmod(0o600)
+        cf_secret.chmod(0o600)
+        class Response:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-uuid"}'
+        class Client:
+            def open(self, request, **_kwargs):
+                self.headers = dict(request.header_items())
+                return Response()
+        client = Client()
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        with patch("tgs_bridge.gateway_access_headers", return_value=gateway_access_headers(cf_id, cf_secret)):
+            self.assertEqual(send_gateway(body, "https://gateway.example", "gateway-bearer", opener=client), "ack")
+        self.assertEqual(client.headers["Authorization"], "Bearer gateway-bearer")
+        self.assertEqual(client.headers["Cf-access-client-id"], "testclientid1234")
+        self.assertEqual(client.headers["Cf-access-client-secret"], "testsecretvalue1234")
+
+    def test_gateway_post_uses_cloudflare_compatible_user_agent(self):
+        from tgs_bridge import GATEWAY_USER_AGENT
+        class Response:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"gateway-id"}'
+        class Client:
+            request = None
+            def open(self, request, **_kwargs):
+                self.request = request
+                return Response()
+        client = Client()
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        self.assertEqual(send_gateway(body, "https://gateway.example",
+                         "testtoken", opener=client,
+                         access_headers_override={"CF-Access-Client-Id": "id-demo",
+                                                  "CF-Access-Client-Secret": "secret-demo"}), "ack")
+        self.assertEqual(client.request.get_header("User-agent"), GATEWAY_USER_AGENT)
+        self.assertEqual(client.request.get_header("Authorization"), "Bearer testtoken")
+        self.assertEqual(client.request.get_header("Cf-access-client-id"), "id-demo")
+
+    def test_gateway_redirects_never_forward_internal_bearer(self):
+        # urllib's default POST 301/302/303 handler can copy Authorization
+        # to a different origin. Our handler must refuse every redirect.
+        request = urllib.request.Request(
+            "https://gateway.example/internal/events", data=b"{}", method="POST",
+            headers={"Authorization": "Bearer dummy-internal-token"})
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                self.assertIsNone(_NoGatewayRedirect().redirect_request(
+                    request, None, status, "redirect",
+                    {"Location": "https://untrusted.example/collect"},
+                    "https://untrusted.example/collect"))
+
+    def test_redirect_response_blocks_until_gateway_url_is_repaired(self):
+        class Client:
+            def open(self, request, **_kwargs):
+                raise urllib.error.HTTPError(
+                    request.full_url, 302, "redirect",
+                    {"Location": "https://untrusted.example/collect"}, None)
+
+        body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+        self.assertEqual(send_gateway(body, "https://gateway.example",
+                                      "dummy-internal-token", opener=Client()), "blocked")
+
+    def test_real_urllib_opener_never_forwards_bearer_on_redirect(self):
+        # Exercise urllib's real response/redirect chain, not just the guard
+        # method in isolation. No network request leaves this fake handler.
+        from email.message import Message
+
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                class FakeResponse:
+                    def __init__(self, url):
+                        self.code = self.status = status
+                        self.msg = "Redirect"
+                        self.url = url
+                        self.headers = Message()
+                        self.headers["Location"] = "https://untrusted.example/collect"
+
+                    def info(self): return self.headers
+                    def geturl(self): return self.url
+                    def read(self, *_args): return b""
+                    def close(self): pass
+
+                class FakeGateway(urllib.request.BaseHandler):
+                    handler_order = 100
+
+                    def __init__(self):
+                        self.calls = []
+
+                    def https_open(self, request):
+                        self.calls.append((request.full_url,
+                                           request.get_header("Authorization")))
+                        return FakeResponse(request.full_url)
+
+                gateway = FakeGateway()
+                opener = urllib.request.build_opener(_NoGatewayRedirect(), gateway)
+                request = urllib.request.Request(
+                    "https://gateway.example/internal/events", data=b"{}",
+                    method="POST", headers={"Authorization": "Bearer dummy-internal-token"})
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    opener.open(request, timeout=1)
+                self.assertEqual(error.exception.code, status)
+                self.assertEqual(gateway.calls, [
+                    ("https://gateway.example/internal/events",
+                     "Bearer dummy-internal-token"),
+                ])
+
+    def test_default_gateway_opener_installs_redirect_guard(self):
+        class FakeResponse:
+            status = 202
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b'{"ok":true,"duplicate":false,"eventId":"receipt"}'
+
+        with patch("tgs_bridge.urllib.request.build_opener") as make_opener:
+            make_opener.return_value.open.return_value = FakeResponse()
+            body = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
+            self.assertEqual(send_gateway(body, "https://gateway.example",
+                                          "dummy-internal-token"), "ack")
+            self.assertIsInstance(make_opener.call_args.args[0], _NoGatewayRedirect)
+
     def test_exact_log_contract_and_no_user_data(self):
         payload = envelope(validate(sample()), occurred_at="2026-10-28T00:00:00Z")
         self.assertEqual(payload["sourceId"], "gserver-bot")
@@ -140,6 +331,25 @@ class TgsBridgeTests(unittest.TestCase):
         second = self.queue.claim(now=161)
         self.assertEqual(first[1], second[1])
         self.assertEqual(second[2], 2)
+
+    def test_expired_last_attempt_crash_becomes_operator_blocked(self):
+        # A crash after the final claim cannot leave an immortal 'sending'
+        # row or schedule an undocumented attempt 21.
+        self.queue.accept(sample(), now=100)
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            claimed = self.queue.claim(now=100 + (attempt - 1) * 61)
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed[2], attempt)
+
+        last_claim_time = 100 + (MAX_ATTEMPTS - 1) * 61
+        self.assertIsNone(self.queue.claim(now=last_claim_time + 59))
+        self.assertEqual(self.queue.counts()["sending"], 1)
+
+        self.assertIsNone(self.queue.claim(now=last_claim_time + 61))
+        self.assertEqual(self.queue.counts()["sending"], 0)
+        self.assertEqual(self.queue.counts()["blocked"], 1)
+        self.assertEqual(self.queue.retry_blocked(), 1)
+        self.assertEqual(self.queue.counts()["pending"], 1)
 
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
