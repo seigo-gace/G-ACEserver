@@ -138,3 +138,26 @@ A/B/Cは論理的な所有・認証境界の識別子。**実Cloudflareアカウ
 - `CRYPTO-05`: 単なる暗号ライブラリ導入やSource単体PASSではなく、Gserver実Runtimeの鍵使用・漏洩防止と、通信速度への影響を確認。
 
 **決定境界**：この追補で既存のVault利用が正式契約上可能なら利用を検討するが、Vault提供元の改修、既存利用者のSecret移行、Contabo接続、新たな公開API/権限拡大は許可しない。必要な場合は影響範囲と承認事項を分けてMasterへ具体案を提示する。
+
+## 9. Cloudflare防御の非削減・最小重複チェック（Master明示確認）
+
+**VPN導入を理由に既存Cloudflare保護を削除・弱体化・迂回してはならない。** 実環境の設定値は未調査のため、「存在する」とは推定せず、採用済み防御・現行設定・変更後の差を確認してから判断する。各防御には異なる責務がある。
+
+- DNS・Zone所有権・API Token/Tunnel Credential/Access Policyの独立性：維持。Zone A/B/C混用禁止。
+- TLS/HTTPS/証明書・HTTPS強制：維持。新WebhookホストやcallbackのTLS検証を省略しない。
+- WAF・レート制限・DDoS対策：既存ポリシーを確認し維持。Telegram正規Webhookを誤遮断しないルールは**限定例外**として設計・試験する。防御そのものを無効化しない。
+- Cloudflare Access：管理UI・保護内部APIなど適用可能な入口に維持。Telegramのような外部Webhook送信元が対話ログインできない場合は、独立Webhook専用入口と`secret_token`などアプリ認証を併用する。Accessを一律Webhookへ強制して機能停止させたり、逆に全域から外したりしない。
+- Tunnel・Origin IP保護：受信専用の正式経路を確認。家庭側の未許可ポート公開、Proxy/Tunnel障害時の直接公開Fallbackは禁止。
+- Webhook真正性・Body/Method/Content-Type/サイズ/頻度・冪等性：Cloudflare機能だけに任せずアプリ側でも検証。
+- Logging/Monitoring：CloudflareとBotの異常/拒否/認証失敗を検知するが、Secret・家庭IP・個人データを公開ログへ出さない。
+- VPN/Cloudflare経路：`Telegram -> Cloudflare` はTelegram側からの通信でWindscribeトンネルを通るわけではない。Gserver側`cloudflared -> Cloudflare`接続は別Egress。Windscribe通過要否は実測で判断するが、Kill Switchの例外がBotの直接WAN経路になってはならない。
+- 資源最小化：既存WAF/Tunnel/Vaultの機能を重複実装しない。ただし異なる責務（通信経路の暗号化、アプリ認証、保存時暗号化、アクセス制限）を「二重だから不要」と省略しない。
+
+**追加受入**：
+`CF-01` 既存DNS/TLS/WAF/rate limit/Access/Tunnel/Origin設定をread-only台帳化。
+`CF-02` 新規候補と現行設定の差分、保護強度、運用上の理由を説明し、設定弱体化0件。
+`CF-03` 正規Webhook到達・偽装/不正・過大Body・高頻度要求への防御を確認。
+`CF-04` Tunnel/VPN停止・再起動時にOrigin直公開/秘匿Egressの迂回が無いことを実測。
+`CF-05` 不必要な重複コンポーネントを増やさず、既存機能を再利用して性能を比較。
+
+**Status**: この段階はSource引継ぎのみ。Cloudflare Liveのポリシー、Codex反映、実機Packet/送受信E2EはいずれもNOT_VERIFIED。
