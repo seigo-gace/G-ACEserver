@@ -7,3 +7,4 @@ python3 -B -m unittest discover -s tests -p test_gserver_recovery_check.py -q >/
 sudo -v
 python3 -B scripts/gserver_recovery_check.py
 python3 -B scripts/smoke_gserver_apps_host.py
+python3 -B scripts/smoke_gserver_vpn_guard.py

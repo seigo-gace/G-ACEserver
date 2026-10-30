@@ -1,5 +1,8 @@
 # Independent app operation (F02 / S2)
 
+> **2026-10-31 PC実機受入:** Master返却で2 project同時起動、片方の停止分離、stop/start後の永続化、設定更新/旧設定復帰、既存Core/Storage/他container不変、cleanupの全項目PASS（VERIFY=PASS/EXIT_CODE=0）。F02の汎用アプリ基盤としてこの範囲を受入済み。実Bot/Tumblrの機能、異image/DB migration rollback、Windows完全自動起動、VPN/Cloudflare/媒体/速度の受入は別Gate。正常な同一smokeを目的なく再実行しない。
+
+
 Gserver hosts app-owned Docker Compose projects. The existing Core/API/Storage does not need redeployment to add an app. No Bot/Tumblr implementation, external Gateway/TGS connection, new runtime dependency or Web management UI is required.
 
 ## Local CLI

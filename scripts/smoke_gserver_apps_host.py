@@ -238,11 +238,17 @@ def main():
                     print("CORE_STORAGE_OTHER_CONTAINERS_UNCHANGED=PASS", flush=True)
                 except (apps.AppError, ValueError, KeyError):
                     failure = "CORE_STORAGE_READBACK"
-    print("VERIFY=" + ("FAIL" if failure else "PASS"))
+    ok = failure is None
+    if ok:
+        save_diagnostic({"schema": "gserver.synthetic-app-success.v1", "phase": "COMPLETE",
+                         "checks": ["two_projects", "stop_isolation", "persistence", "config_rollback",
+                                    "core_storage_unchanged"]})
+        print("PROBE_PRIVATE_SUCCESS=SAVED", flush=True)
+    print("VERIFY=" + ("PASS" if ok else "FAIL"))
     print("ERROR=" + ("APP_SMOKE_" + failure if failure else "NONE"))
-    print("EXIT_CODE=" + ("1" if failure else "0"))
+    print("EXIT_CODE=" + ("0" if ok else "1"))
     print("PROJECT_END=Gserver\n========== GACE_RESULT_END ==========", flush=True)
-    return 1 if failure else 0
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

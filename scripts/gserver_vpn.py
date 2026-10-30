@@ -26,8 +26,42 @@ SOCKET = 'unix:///var/run/docker.sock'
 GUARD = 'gserver_privacy'
 
 
+# Executed only through the caller's existing sudo authority. Opening the netns
+# here avoids requiring an unprivileged controller to stat root-owned PIDs.
+NAMESPACE_HELPER = r"""
+import json,os,subprocess,sys
+fd=None
+try:
+ mode,pid=sys.argv[1],int(sys.argv[2])
+ if mode not in ('install','inspect') or pid<=1:
+  raise ValueError('INVALID_NAMESPACE_REQUEST')
+ fd=os.open('/proc/'+str(pid)+'/ns/net',os.O_RDONLY)
+ inode=os.fstat(fd).st_ino
+ if inode==os.stat('/proc/1/ns/net').st_ino:
+  raise ValueError('HOST_NAMESPACE_FORBIDDEN')
+ command=['nsenter','--net=/proc/self/fd/'+str(fd),'nft']
+ if mode=='install':
+  subprocess.run(command+['-f',sys.argv[3]],pass_fds=(fd,),check=True,capture_output=True,text=True,timeout=20)
+ result=subprocess.run(command+['-j','list','table','inet','gserver_privacy'],pass_fds=(fd,),check=True,capture_output=True,text=True,timeout=20)
+ print(json.dumps({'ok':True,'inode':inode,'nft':json.loads(result.stdout)}))
+except (OSError,ValueError,subprocess.CalledProcessError,subprocess.TimeoutExpired) as exc:
+ code='HOST_NAMESPACE_FORBIDDEN' if str(exc)=='HOST_NAMESPACE_FORBIDDEN' else 'NAMESPACE_GUARD_COMMAND_FAILED'
+ if isinstance(exc,PermissionError):code='NAMESPACE_PERMISSION_DENIED'
+ if isinstance(exc,FileNotFoundError):code='NAMESPACE_TOOL_OR_PID_MISSING'
+ if isinstance(exc,subprocess.CalledProcessError):code='NFT_COMMAND_FAILED'
+ if isinstance(exc,subprocess.TimeoutExpired):code='NAMESPACE_COMMAND_TIMEOUT'
+ diagnostic=exc.stderr if isinstance(exc,subprocess.CalledProcessError) else ''
+ print(json.dumps({'ok':False,'code':code,'diagnostic':diagnostic or ''}))
+finally:
+ if fd is not None:os.close(fd)
+"""
+
+
 class VPNError(Exception):
-    pass
+    def __init__(self, code, diagnostic=''):
+        super().__init__(code)
+        self.diagnostic = diagnostic
+
 
 
 def private_read(path, limit=32768):
@@ -115,6 +149,7 @@ def guard_rules(endpoint, port):
   oifname "lo" ip daddr 127.0.0.0/8 accept
   oifname "tun0" meta nfproto ipv4 accept
   oifname "eth0" ip daddr {ip} udp dport {int(port)} accept
+  counter drop
  }}
 }}
 '''
@@ -225,6 +260,40 @@ def run(cmd, input=None):
     return result.stdout
 
 
+def namespace_guard(pid, rules=None):
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
+    mode = 'install' if rules is not None else 'inspect'
+    cmd = privilege + ['python3', '-c', NAMESPACE_HELPER, mode, str(pid)]
+    if rules is not None:
+        cmd.append(str(rules))
+    try:
+        result = json.loads(run(cmd))
+        if not isinstance(result, dict):
+            raise ValueError()
+        if result.get('ok') is not True:
+            code = result.get('code', 'NAMESPACE_GUARD_COMMAND_FAILED')
+            if not isinstance(code,str) or not re.fullmatch(r'[A-Z_]{1,64}',code):
+                code = 'NAMESPACE_GUARD_COMMAND_FAILED'
+            raise VPNError(code, diagnostic=result.get('diagnostic',''))
+        if not isinstance(result.get('inode'), int) or not isinstance(result.get('nft'), dict):
+            raise ValueError()
+    except (ValueError, TypeError) as exc:
+        raise VPNError('NAMESPACE_REPORT_INVALID') from exc
+    return result
+
+
+def policy_fingerprint(report):
+    # Counters change with packets; rule semantics must remain identical.
+    def clean(value):
+        if isinstance(value, dict):
+            return {k: (0 if k in ('packets', 'bytes') else clean(v))
+                    for k, v in value.items() if k not in ('handle', 'metainfo')}
+        if isinstance(value, list):
+            return [clean(v) for v in value if not isinstance(v, dict) or 'metainfo' not in v]
+        return value
+    return hashlib.sha256(json.dumps(clean(report['nft']),sort_keys=True).encode()).hexdigest()
+
+
 def start(directory):
     directory, manifest = load(directory)
     privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
@@ -251,21 +320,25 @@ def start(directory):
         pid = info['State']['Pid']
         if not isinstance(pid, int) or pid <= 1 or info['Config']['Labels']['com.docker.compose.project'] != manifest['project']:
             raise VPNError('VPN_NAMESPACE_INVALID')
-        ns = f'/proc/{pid}/ns/net'
-        if os.stat(ns).st_ino == os.stat('/proc/1/ns/net').st_ino:
-            raise VPNError('HOST_NAMESPACE_FORBIDDEN')
-        inode = os.stat(ns).st_ino
-        run(privilege + ['nsenter', '--net=' + ns, 'nft', '-f', str(directory / 'guard.nft')])
+        initial = namespace_guard(pid, directory / 'guard.nft')
         # Refuse PID/container restart between guard installation and release.
         after = json.loads(run(docker + ['inspect', ids[0]]))[0]
-        if after['State']['Pid'] != pid or os.stat(ns).st_ino != inode:
+        current = namespace_guard(pid)
+        if after['State']['Pid'] != pid or current['inode'] != initial['inode']:
             raise VPNError('VPN_NAMESPACE_CHANGED')
         _, wireguard = private_read(directory / 'wireguard.conf')
         run(docker + ['exec', '-i', ids[0], '/bin/sh', '-ec',
                      'umask 077; mkdir -p /gluetun/wireguard; cat > /gluetun/wireguard/wg0.conf'],
             input=wireguard.decode('ascii'))
         run(docker + ['exec', ids[0], '/bin/sh', '-ec', 'touch /run/gserver-guard/ready'])
-        run(compose + ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '90'])
+        ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '90']
+        run(compose + ready + ['vpn'])
+        # Verify independent guard survived the VPN's own firewall setup before
+        # giving any application access to this network namespace.
+        current = namespace_guard(pid)
+        if current['inode'] != initial['inode'] or policy_fingerprint(current) != policy_fingerprint(initial):
+            raise VPNError('VPN_GUARD_CHANGED_DURING_BOOTSTRAP')
+        run(compose + ready + ['app'])
     except BaseException:
         if created:
             try:

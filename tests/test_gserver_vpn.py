@@ -164,9 +164,11 @@ class VPNTests(unittest.TestCase):
             if 'ps' in cmd:
                 if '-aq' in cmd: return 'old' if existing else ''
                 return 'probe-container'
+            if vpn.NAMESPACE_HELPER in cmd:
+                if 'install' in cmd and fail_guard: raise vpn.VPNError('TEST_GUARD_FAILURE')
+                return json.dumps({'ok':True,'inode':2,'nft':{'nftables':[]}})
             if 'inspect' in cmd and 'image' not in cmd:
                 return json.dumps([{'State': {'Pid': 4242}, 'Config': {'Labels': {'com.docker.compose.project': manifest['project']}}}])
-            if 'nft' in cmd and fail_guard: raise vpn.VPNError('TEST_GUARD_FAILURE')
             return ''
         def namespace(path, *args, **kwargs):
             return types.SimpleNamespace(st_ino=1 if str(path)=='/proc/1/ns/net' else 2)
@@ -180,9 +182,9 @@ class VPNTests(unittest.TestCase):
 
     def test_guard_is_installed_before_vpn_release_and_app_start(self):
         calls = self.exercise_start()
-        guard = next(i for i,c in enumerate(calls) if 'nft' in c)
+        guard = next(i for i,c in enumerate(calls) if vpn.NAMESPACE_HELPER in c and 'install' in c)
         release = next(i for i,c in enumerate(calls) if 'touch /run/gserver-guard/ready' in c)
-        app = next(i for i,c in enumerate(calls) if '--wait' in c)
+        app = next(i for i,c in enumerate(calls) if '--wait' in c and c[-1]=='app')
         self.assertLess(guard, release)
         self.assertLess(release, app)
         self.assertFalse(any('pull' in c or 'build' in c for c in calls))
@@ -197,6 +199,38 @@ class VPNTests(unittest.TestCase):
     def test_existing_project_is_refused_before_start(self):
         calls = self.exercise_start(existing=True)
         self.assertFalse(any('up' in c or 'stop' in c for c in calls))
+
+    def test_privileged_helper_rejects_host_namespace_before_nft(self):
+        import sys
+        with mock.patch.object(sys,'argv',['helper','install','42','guard.nft']), \
+             mock.patch('os.open',return_value=9), mock.patch('os.fstat',return_value=types.SimpleNamespace(st_ino=1)), \
+             mock.patch('os.stat',return_value=types.SimpleNamespace(st_ino=1)), mock.patch('os.close'), \
+             mock.patch('subprocess.run') as runner, contextlib.redirect_stdout(io.StringIO()) as output:
+            exec(vpn.NAMESPACE_HELPER,{})
+        self.assertFalse(json.loads(output.getvalue())['ok'])
+        runner.assert_not_called()
+
+    def test_privileged_helper_pins_namespace_fd(self):
+        import sys
+        result=types.SimpleNamespace(stdout='{"nftables":[]}',returncode=0)
+        with mock.patch.object(sys,'argv',['helper','install','42','guard.nft']), \
+             mock.patch('os.open',return_value=9), mock.patch('os.fstat',return_value=types.SimpleNamespace(st_ino=2)), \
+             mock.patch('os.stat',return_value=types.SimpleNamespace(st_ino=1)), mock.patch('os.close') as close, \
+             mock.patch('subprocess.run',return_value=result) as runner, contextlib.redirect_stdout(io.StringIO()) as output:
+            exec(vpn.NAMESPACE_HELPER,{})
+        self.assertTrue(json.loads(output.getvalue())['ok'])
+        self.assertEqual(runner.call_count,2)
+        for call in runner.call_args_list:
+            self.assertIn('--net=/proc/self/fd/9',call.args[0])
+            self.assertEqual(call.kwargs['pass_fds'],(9,))
+        close.assert_called_once_with(9)
+
+    def test_policy_fingerprint_ignores_only_counters_and_handles(self):
+        a={'nft':{'nftables':[{'rule':{'handle':1,'expr':[{'counter':{'packets':0,'bytes':0}},{'drop':None}]}}]}}
+        b={'nft':{'nftables':[{'rule':{'handle':2,'expr':[{'counter':{'packets':5,'bytes':100}},{'drop':None}]}}]}}
+        self.assertEqual(vpn.policy_fingerprint(a),vpn.policy_fingerprint(b))
+        b['nft']['nftables'][0]['rule']['expr'][-1]={'accept':None}
+        self.assertNotEqual(vpn.policy_fingerprint(a),vpn.policy_fingerprint(b))
 
     def test_existing_network_is_refused_without_container_or_image_changes(self):
         out, manifest = self.bundle()

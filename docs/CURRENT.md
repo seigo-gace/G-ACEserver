@@ -1,9 +1,20 @@
+# 2026-10-31 Cursor Composer｜Issue #9 / PR #15 引継ぎ・実装継続
+
+- **引継ぎ:** [Issue #9 2026-10-31 Composer指示](https://github.com/seigo-gace/G-ACEserver/issues/9)とPR #15（logging修正 `d38e5fc`、VPN namespace helper・R14）をD側 `/home/gace/Project/Gserver/repository` で受領。編集元はD側ext4のみ。G側 `/mnt/g/Project/Gserver/repository` は触らない。Core loopback `/health` 200をComposer shellで確認。
+- **ローカルツリー:** branch `chat/gserver-generic-app-runtime-20261030`、GitHub比 `0 behind / 1 ahead`（local `7c2d1ca` 設計R14追記）、未コミット6件＝`gserver_vpn.py` namespace sudo helper・guard fingerprint・VPN/app段階起動、`smoke_gserver_vpn_guard.py`+tests、APPS/VPN_RUNTIME文書、app smoke成功receipt保存、`verify_gserver_resume.sh`にkernel guard smoke追加。
+- **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **238 tests PASS**（VPN helper/guard smoke offline含む）。CI未実行。
+- **Runtime（Master端末 2026-10-31）:** recovery readback PASS。**2app generic smoke VERIFY=PASS**（`PROBE_PRIVATE_SUCCESS=SAVED`）。**namespace guard kernel smoke VERIFY=PASS**（peer canary baseline、loopback許可、guard後peer遮断、drop counter増加、Core/Storage/他container不変）。WireGuard/WAN/Cloudflareは未試験どおり。R14のkernel実証Gateは**この範囲で受入済み**（JP/KR接続・漏洩・速度・cloudflared統合は未受入）。
+- **C/D:** FINAL_ACCEPTANCEどおりC=Windows最小・D HDD上WSL ext4をLinux実行元。recovery baselineでD側git status中央値≈3.5ms、G旧copy≈221ms（read-only receipt）。無断WSL移設・Cursor User Data移動・Docker prune/build/pull禁止を維持。
+- **Exact Next:** D側未コミット差分をPR #15へ整理（commit/pushはMaster指示時）。続きは設計v3のVPN接続前Gate—endpoint pin・digest監査済みlocal Gluetun image・private bundle `render`/`start` の**隔離接続試験**（Core再配備・pull/buildなし方針維持）。並行タスク: F01 Windows→WSL自動起動実測、F03残Gate、F04/F05/F08。F01〜F08全体未完了。
+
+---
+
 # 2026-10-31 追補｜独立app起動失敗の原因確定・修正
 
 - **原因確定（Master実機）:** Docker daemon/State.Error=`failed to initialize logging driver: compression cannot be enabled when max file count is 1`。検証用Composeのlocal loggingが既定圧縮ONのままmax-file=1だった。Python/app/認証/Volume故障ではなく、ログdriver初期化でprocess起動前に拒否されたことを確認。exit128/OOM=Falseと整合する。
 - **修正:** probeのlocal loggingをmax-size=1m/max-file=2へ変更し、容量上限・圧縮を維持。汎用app CLIもlocal driverの「圧縮ON + max-file=1」をverify段階で拒否し、同原因の再発を防止。既存Coreのloggingは元からmax-file=3であり変更不要。VPN rendererはmax-file=2であり今回の欠陥なし。
-- **検証:** 重点24 tests PASS、diff check PASS。圧縮ON/保存数1の拒否、保存数2/default・明示圧縮OFF/保存数1の許可を回帰確認。修正後の実app起動/共存/永続化/更新復帰はまだ未実測。Core/Storage/SQLiteの復帰PASS・spool2・他container不変は保持。
-- **Exact Next:** 同じWSL端末でsudo認証後、D側の `scripts/smoke_gserver_apps_host.py`だけ再実行。Core再起動・daemon設定変更・Firewall/capability緩和・image build/pullなし。実機PASS前にF02完了と記録しない。
+- **検証:** 重点24 tests PASS、diff check PASS。圧縮ON/保存数1の拒否、保存数2/default・明示圧縮OFF/保存数1の許可を回帰確認。修正後の実app起動/共存/永続化/更新復帰はMaster端末sudo後のsmokeで受入（Composer shell単体では未再実行）。Core/Storage/SQLiteの復帰PASS・spool2・他container不変は保持。
+- **Exact Next:** 上記Composer節の `verify_gserver_resume.sh` 一括実行。Core再起動・daemon設定変更・Firewall/capability緩和・image build/pullなし。
 
 ---
 

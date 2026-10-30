@@ -14,10 +14,10 @@ JP/KRの原本は変更しない。WSL側のowner-only 0600コピーを使い、
 
 1. 全imageがローカルにあること、同名project/container/networkがないことを確認。pull/buildはしない。
 2. VPN専用containerを待機entrypointで起動。まだWG/外部通信を開始しない。
-3. container PIDと専用netnsを取得し、Host namespaceと同一なら拒否。`nsenter --net=... nft -f guard.nft` は**そのnamespaceだけ**に適用する。
+3. container PIDと専用netnsを取得し、Host namespaceと同一なら拒否。短命sudo helperがnamespace FDを開きHost namespaceと異なることを照合し、そのFDを渡した `nsenter --net=/proc/self/fd/... nft -f guard.nft` で**そのnamespaceだけ**に適用する。非root controllerへroot PIDのnamespace読取権限を要求しない。
 4. 物理eth0→選択WG endpoint UDPだけ許可。IPv4 tun0と限定loopback以外の出力はdrop、Docker DNS `127.0.0.11:53`もdrop。IPv6は当該namespaceだけ無効化する。HostのFirewall/daemon/DNSは変更しない。
 5. PID/namespace inodeを再照合し、鍵をDocker stdinで専用tmpfsの0600ファイルへ供給してから起動markerを解放する。鍵をenv/argv/Compose本文に入れない。
-6. VPN health後だけappを同一projectのVPN netns内で起動。appは非root、cap_drop ALL、read-only、追加network/portなし。DNSは非秘密inline configでVPN内resolverを指す。
+6. VPN health後に独立guardのnamespace inode・rule fingerprintを再照合してからappを同一projectのVPN netns内で起動。appは非root、cap_drop ALL、read-only、追加network/portなし。DNSは非秘密inline configでVPN内resolverを指す。
 7. 失敗したら今回作成したprojectだけstop。volume削除・他project操作・直接WANへのfallbackは行わない。既存projectへのadoptは拒否する。
 
 VPN/app restartは現段階`no`。gatewayの再作成・JP/KR切替ではappも再作成する必要がある。controller中断やDocker/WSL再起動後にguard無しで勝手に外部通信を再開させない。自動復帰はguard再適用を含む実機試験後の追加段階。
@@ -48,3 +48,13 @@ python3 -B scripts/gserver_vpn.py start PRIVATE_BUNDLE_DIRECTORY
 `bash scripts/verify_gserver_resume.sh` は重点テスト→同一端末sudo本人認証→read-only Core/Owner Storage/SQLite quick_check→既存2app probeの順。修復/再起動/設定変更をしない。Core/Storageの実readbackは既存container内で行い、Tokenを外へ出さない。SQLiteはmode=ro/query_onlyで照合し、spoolをclaimしない。
 
 Windows→WSLの自動起動と、現在のCore応答/DB整合性を別判定する。電源断前のdata fingerprint/backupがなければ全データ一致PASSにしない。既存app probeの失敗は分類したDocker理由・合成process例外・exit/OOMをcleanup前に出す。生の実appログ、認証情報、環境変数は出力しない。
+
+## 次の実kernel受入（VPN接続より前）
+
+`scripts/smoke_gserver_vpn_guard.py` は、既存Coreのlocal imageを新規random projectで使い、**同一Compose bridge上のprivate peer canary**（RFC1918、WAN/public宛なし）でguardを実証する。Host bridge gatewayへのbindはWSL/Docker差で不安定なため使わない。VPN設定/鍵は使わず、WG接続・public宛送信・Cloudflare変更・image build/pullはしない。guard適用前にpeer canary到達、適用後にloopback成功/peer遮断/nft drop counter増加を確認する。成功でもWireGuard/実kill-switch/JP-KR/DNS/IPv6/性能の全受入とはしない。
+
+controllerはCore/Owner Storage応答・既存containerを前後照合し、新規probeと専用network・Host listenerを必ずcleanupする。guardは対象netnsのみ、Host table/daemon設定は変更しない。helper失敗時は安全なreasonと秘匿化したnftエラーを出し、ログ未生成を原因不明のまま見落とさない。実機実行には同じ端末のsudo本人認証が必要。kernelのmock試験は実機PASSではない。
+
+Gluetun公式Sourceはrepository IDを維持して `passteque/gluetun` へ移行済み、公式READMEでimage名は従来どおりと確認。2026-10-31の公式latest release読取はv3.41.3。これは候補情報でありdigest監査・取得・PC適用の証拠ではない。
+
+**2026-10-31 PC実機:** Master端末で `smoke_gserver_vpn_guard.py` が VERIFY=PASS（peer canary・namespace nft guard・Core不変）。WireGuard実接続・出口IP・DNS/IPv6・性能・cloudflared同一経路は未受入。

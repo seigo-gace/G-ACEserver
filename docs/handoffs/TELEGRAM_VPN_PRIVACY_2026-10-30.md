@@ -167,6 +167,6 @@ NET_ADMIN以外をdropしたrootコンテナは、Host user所有0600ファイ�
 
 ### R14 / 実kernel試験への移行とnamespace読取権限
 
-汎用2app共存/停止再起動/永続化/設定復帰/Core不変はMaster実機でPASS（2026-10-31）。次は実WireGuard接続より前に、既存local imageと一時bridgeコンテナで実nftablesの遮断を検証する。宛先は当該Docker bridgeのHost側private canaryだけ、外部送信なし。guard適用前のcanary到達、適用後のloopback到達/Host canary遮断、drop counter増加を確認する。専用netnsだけを操作し、Host全体のFirewallは変更しない。これはnamespace guardのkernel実証であって、WireGuard断/JP-KR/DNS/IPv6/Cloudflare/速度の全受入ではない。
+汎用2app共存/停止再起動/永続化/設定復帰/Core不変はMaster実機でPASS（2026-10-31）。同一bridge private peer canaryによる namespace nft guard kernel smoke も Master実機 VERIFY=PASS（2026-10-31）。試験は宛先を同一Compose bridge上のprivate peer canary（RFC1918、WAN/publicなし）とし、Host bridge gateway bindはWSL/Docker差で使わない。guard適用前のpeer到達、適用後のloopback到達/peer遮断、drop counter増加を確認する。専用netnsだけを操作し、Host全体のFirewallは変更しない。これはnamespace guardのkernel実証であって、WireGuard断/JP-KR/DNS/IPv6/Cloudflare/速度の全受入ではない。次Gateはendpoint pin・digest監査済みGluetun・隔離bundle起動による実WireGuard接続試験。
 
 通常userはroot-owned container PIDの`/proc/PID/ns/net`を読めない場合がある。namespaceのopen・Host namespaceとのinode比較・nft適用・readbackは同じ既存sudo権限の短命helper内で行い、開いたFDをnsenterへ渡して対象を固定する。controllerが非rootのままroot PIDのnamespaceをstatできるという仮定を除去する。guard適用後はDocker PIDとhelperのnamespace inodeを再照合してから鍵/起動markerを解放する。sudo権限を全user/常駐処理へ拡大せず、他project/Host namespaceへの操作は拒否する。
