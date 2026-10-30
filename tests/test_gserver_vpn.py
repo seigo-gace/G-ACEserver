@@ -145,7 +145,15 @@ class VPNTests(unittest.TestCase):
         self.assertEqual(gateway['restart'], 'no')
         self.assertIn('gserver-guard/ready', gateway['entrypoint'][-1])
         self.assertEqual(gateway['environment']['FIREWALL'], 'on')
-        self.assertNotIn('FIREWALL_OUTBOUND_SUBNETS', gateway['environment'])
+        self.assertIn('/32', gateway['environment']['FIREWALL_OUTBOUND_SUBNETS'])
+        self.assertEqual(gateway['environment']['DNS_SERVER'], '127.0.0.1')
+        self.assertNotIn('DOT', gateway['environment'])
+
+    def test_gluetun_log_summary_skips_banner_and_keeps_errors(self):
+        raw = '@@@ banner @@@\n2026-01-01 ERROR cannot bind wireguard: test\n'
+        summary = vpn.gluetun_log_summary(raw)
+        self.assertIn('ERROR', summary)
+        self.assertNotIn('@@@', summary)
 
     def test_sanitize_diagnostic_redacts_long_tokens(self):
         raw = 'compose_up_vpn_wait_healthy: error PrivateKey=abc ' + ('x' * 40)

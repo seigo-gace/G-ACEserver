@@ -356,9 +356,13 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
     # DNS belongs in the app resolv.conf after Gluetun is up; pre-tunnel DNS in wg0.conf
     # can make Gluetun probe unreachable resolvers while the nft guard is strict.
     runtime['Interface'].pop('DNS', None)
-    import io
-    stream = io.StringIO()
-    runtime.write(stream)
+    wg_lines = []
+    for section in ('Interface', 'Peer'):
+        wg_lines.append('[' + section + ']')
+        for key, value in runtime[section].items():
+            wg_lines.append(f'{key} = {value}')
+        wg_lines.append('')
+    wireguard_conf = '\n'.join(wg_lines).strip() + '\n'
     pinned(vpn_image)
     pinned(app_image)
     if cloudflared_image:
@@ -379,10 +383,13 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
             'sysctls': {'net.ipv6.conf.all.disable_ipv6': '1', 'net.ipv6.conf.default.disable_ipv6': '1'},
             'entrypoint': ['/bin/sh', '-ec', 'while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; exec /gluetun-entrypoint'],
             'environment': {'VPN_SERVICE_PROVIDER': 'custom', 'VPN_TYPE': 'wireguard',
-                'VPN_INTERFACE': 'tun0', 'FIREWALL': 'on', 'HTTPPROXY': 'off',
-                'SHADOWSOCKS': 'off', 'DOT': 'off', 'UPDATER_PERIOD': '0',
-                'BLOCK_MALICIOUS': 'off', 'BLOCK_SURVEILLANCE': 'off', 'BLOCK_ADS': 'off',
-                'LOG_LEVEL': 'warn'},
+                'VPN_INTERFACE': 'tun0', 'VPN_ENDPOINT_IP': selected,
+                'VPN_ENDPOINT_PORT': str(p['port']),
+                'FIREWALL': 'on', 'FIREWALL_OUTBOUND_SUBNETS': f'{selected}/32',
+                'FIREWALL_VPN_INPUT_PORTS': str(p['port']), 'HTTPPROXY': 'off',
+                'SHADOWSOCKS': 'off', 'DNS_SERVER': '127.0.0.1', 'DNS_KEEP_NAMESERVER': 'off',
+                'UPDATER_PERIOD': '0', 'BLOCK_MALICIOUS': 'off', 'BLOCK_SURVEILLANCE': 'off',
+                'BLOCK_ADS': 'off', 'LOG_LEVEL': 'warn'},
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m', '/gluetun:rw,nosuid,nodev,size=16m',
                       '/run/gserver-guard:rw,noexec,nosuid,nodev,size=1m,mode=0700'],
             'healthcheck': {'test': ['CMD', '/bin/sh', '-ec',
@@ -402,7 +409,7 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
                       '/run/gserver-tunnel:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65534,gid=65534']}
     contents = {'compose.json': json.dumps(config, indent=2) + '\n',
                 'guard.nft': guard_rules(selected, p['port']),
-                'wireguard.conf': stream.getvalue()}
+                'wireguard.conf': wireguard_conf}
     manifest = {'schema': 'gserver.vpn-bundle.v1', 'project': name,
                 'profile': {'path': p['path'], 'region': region, 'sha256': p['sha256']},
                 'components': sorted(config['services']),
@@ -483,7 +490,22 @@ def namespace_guard(pid, rules=None):
     return result
 
 
-def container_logs(docker, container_id, tail=40):
+def gluetun_log_summary(text, limit=600):
+    if not text:
+        return ''
+    hints = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.count('@') > 4:
+            continue
+        if re.search(r'(?i)(error|fatal|panic|failed|cannot|unable|invalid|missing|not found|warn)', stripped):
+            hints.append(sanitize_diagnostic(stripped, limit=240))
+    if hints:
+        return '; '.join(hints[-8:])
+    return sanitize_diagnostic(text, limit=limit)
+
+
+def container_logs(docker, container_id, tail=80):
     try:
         result = subprocess.run(
             docker + ['logs', '--tail', str(tail), container_id],
@@ -494,7 +516,7 @@ def container_logs(docker, container_id, tail=40):
         )
     except OSError:
         return ''
-    return sanitize_diagnostic(((result.stderr or '') + '\n' + (result.stdout or '')).strip(), limit=800)
+    return gluetun_log_summary(((result.stderr or '') + '\n' + (result.stdout or '')).strip())
 
 
 def wait_vpn_healthy(docker, container_id, timeout=150):
@@ -508,7 +530,7 @@ def wait_vpn_healthy(docker, container_id, timeout=150):
             logs = container_logs(docker, container_id)
             raise VPNError(
                 'VPN_CONTAINER_EXITED',
-                diagnostic=sanitize_diagnostic(f'exit_code={exit_code}; {logs}'),
+                diagnostic=sanitize_diagnostic(f'exit_code={exit_code}; {logs}', limit=900),
             )
         health = state.get('Health') or {}
         status = health.get('Status')
@@ -566,7 +588,8 @@ def start(directory):
             raise VPNError('VPN_NAMESPACE_CHANGED')
         _, wireguard = private_read(directory / 'wireguard.conf')
         run(docker + ['exec', '-i', ids[0], '/bin/sh', '-ec',
-                     'umask 077; mkdir -p /gluetun/wireguard; cat > /gluetun/wireguard/wg0.conf'],
+                     'umask 077; mkdir -p /gluetun/wireguard; cat > /gluetun/wireguard/wg0.conf; '
+                     'chmod 600 /gluetun/wireguard/wg0.conf'],
             input=wireguard.decode('ascii'), step='docker_exec_wireguard_conf')
         run(docker + ['exec', ids[0], '/bin/sh', '-ec', 'touch /run/gserver-guard/ready'],
             step='docker_exec_guard_ready')
