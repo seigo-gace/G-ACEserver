@@ -166,6 +166,43 @@ def pinned(image):
     return image
 
 
+def write_endpoint_pin(region, address):
+    """Persist a single public IPv4 endpoint pin in owner-only local state."""
+    if region not in REGIONS:
+        raise VPNError('REGION_INVALID')
+    try:
+        selected = ipaddress.ip_address(str(address).strip())
+        if selected.version != 4 or not selected.is_global:
+            raise ValueError()
+    except ValueError as exc:
+        raise VPNError('ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED') from exc
+    ENDPOINT_CACHE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cache = {}
+    if ENDPOINT_CACHE.is_file():
+        _, data = private_read(ENDPOINT_CACHE)
+        try:
+            loaded = json.loads(data)
+            if isinstance(loaded, dict):
+                cache = loaded
+        except (ValueError, TypeError) as exc:
+            raise VPNError('ENDPOINT_CACHE_INVALID') from exc
+    cache[region] = str(selected)
+    payload = (json.dumps(cache, indent=2, sort_keys=True) + '\n').encode('ascii')
+    tmp = ENDPOINT_CACHE.with_suffix('.tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        os.close(fd)
+        raise VPNError('ENDPOINT_CACHE_WRITE_FAILED') from None
+    os.replace(tmp, ENDPOINT_CACHE)
+    ENDPOINT_CACHE.chmod(0o600)
+    return 'ENDPOINT_PIN_SAVED'
+
+
 def endpoint_pins():
     """Read owner-maintained IPv4 pins; never print addresses or write to Git."""
     if not ENDPOINT_CACHE.is_file():
@@ -286,14 +323,24 @@ def hints():
     return out
 
 
-def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cloudflared_image=None):
-    p = profile(source, region)
+def render_endpoint_ip(region, profile_endpoint, endpoint_ip=None):
+    if endpoint_ip:
+        candidate = endpoint_ip
+    else:
+        pins = endpoint_pins()
+        candidate = pins.get(region) or profile_endpoint
     try:
-        selected = ipaddress.ip_address(endpoint_ip or p['endpoint'])
+        selected = ipaddress.ip_address(candidate)
         if selected.version != 4 or not selected.is_global:
             raise ValueError()
     except ValueError as exc:
         raise VPNError('ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED') from exc
+    return str(selected)
+
+
+def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cloudflared_image=None):
+    p = profile(source, region)
+    selected = render_endpoint_ip(region, p['endpoint'], endpoint_ip)
     # No hostname resolution is performed. A provider hostname requires an
     # explicit pinned address; the peer key is still verified by WireGuard.
     _, raw = private_read(p['path'])
@@ -304,7 +351,7 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
     runtime.read_string(raw.decode('ascii'))
     runtime['Interface']['Address'] = ', '.join(x.strip() for x in runtime['Interface']['Address'].split(',') if ipaddress.ip_interface(x.strip()).version == 4)
     runtime['Peer']['AllowedIPs'] = '0.0.0.0/0'
-    runtime['Peer']['Endpoint'] = str(selected) + ':' + str(p['port'])
+    runtime['Peer']['Endpoint'] = selected + ':' + str(p['port'])
     import io
     stream = io.StringIO()
     runtime.write(stream)
@@ -347,7 +394,7 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700',
                       '/run/gserver-tunnel:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65534,gid=65534']}
     contents = {'compose.json': json.dumps(config, indent=2) + '\n',
-                'guard.nft': guard_rules(str(selected), p['port']),
+                'guard.nft': guard_rules(selected, p['port']),
                 'wireguard.conf': stream.getvalue()}
     manifest = {'schema': 'gserver.vpn-bundle.v1', 'project': name,
                 'profile': {'path': p['path'], 'region': region, 'sha256': p['sha256']},
@@ -499,6 +546,23 @@ def start(directory):
     return 'STARTED_ACCEPTANCE_NOT_VERIFIED'
 
 
+def pull_reference_images(*, confirm=False):
+    """One-time registry pull for digest pinning; never run without explicit confirmation."""
+    if not confirm:
+        raise VPNError('REGISTRY_PULL_NOT_CONFIRMED')
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
+    docker = privilege + ['docker', '--host', SOCKET]
+    references = ('qmcgaw/gluetun:v3.41.3', 'cloudflare/cloudflared:latest')
+    digests = {}
+    for reference in references:
+        run(docker + ['pull', reference], timeout=900)
+        digest = run(docker + ['inspect', reference, '--format', '{{index .RepoDigests 0}}']).strip()
+        if not digest:
+            raise VPNError('LOCAL_PINNED_IMAGE_MISSING')
+        digests[reference] = digest
+    return digests
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -519,6 +583,12 @@ def main():
     probe.add_argument('--cloudflared-image')
     hint = sub.add_parser('hints')
     hint.help = 'List safe local image hints; never prints secrets or profile contents'
+    pin = sub.add_parser('set-endpoint-pin')
+    pin.add_argument('region', choices=REGIONS)
+    pin.add_argument('address', help='Verified public IPv4 for the WireGuard peer endpoint')
+    pull = sub.add_parser('pull-reference-images')
+    pull.add_argument('--confirm-registry-pull', action='store_true',
+                      help='Required flag; pulls Gluetun and cloudflared reference tags once')
     launch = sub.add_parser('start')
     launch.add_argument('directory')
     args = parser.parse_args()
@@ -536,6 +606,11 @@ def main():
         elif args.action == 'hints':
             data = hints()
             print('VPN_HINTS=' + ';'.join(f'{key}={value}' for key, value in sorted(data.items())))
+        elif args.action == 'set-endpoint-pin':
+            print('VPN_' + write_endpoint_pin(args.region, args.address))
+        elif args.action == 'pull-reference-images':
+            digests = pull_reference_images(confirm=args.confirm_registry_pull)
+            print('VPN_REFERENCE_IMAGES=' + ';'.join(f'{key}={value}' for key, value in sorted(digests.items())))
         else:
             print('VPN_RUNTIME=' + start(args.directory))
     except VPNError as exc:

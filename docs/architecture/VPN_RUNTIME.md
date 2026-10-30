@@ -32,6 +32,10 @@ python3 -B scripts/gserver_vpn.py preflight --vpn-image PINNED_GLUETUN_IMAGE --a
 python3 -B scripts/gserver_vpn.py render jp /private/Windscribe-Tokyo-Shinkansen-WG.conf --endpoint-ip VERIFIED_PUBLIC_IPV4 --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --cloudflared-image PINNED_CLOUDFLARED_IMAGE --output NEW_PRIVATE_DIRECTORY
 python3 -B scripts/gserver_vpn.py start PRIVATE_BUNDLE_DIRECTORY
 python3 -B scripts/gserver_connection_readiness.py --bundle PRIVATE_BUNDLE_DIRECTORY
+python3 -B scripts/gserver_connection_readiness.py --local-status
+python3 -B scripts/gserver_vpn.py set-endpoint-pin jp VERIFIED_PUBLIC_IPV4
+python3 -B scripts/gserver_vpn.py pull-reference-images --confirm-registry-pull
+python3 -B scripts/smoke_gserver_vpn_live.py
 ```
 
 上記は引数契約の説明であり、placeholderのまま実行する手順ではない。通常userから起動し、必要なDocker/nsenterだけ既存sudo権限を使う。生成親directoryは既存のowner-onlyローカルstateを選ぶ。real image digest/endpoint pin/実app契約がない状態で適当な値を埋めて稼働させない。
@@ -61,3 +65,18 @@ controllerはCore/Owner Storage応答・既存containerを前後照合し、新�
 Gluetun公式Sourceはrepository IDを維持して `passteque/gluetun` へ移行済み、公式READMEでimage名は従来どおりと確認。2026-10-31の公式latest release読取はv3.41.3。これは候補情報でありdigest監査・取得・PC適用の証拠ではない。
 
 **2026-10-31 PC実機:** Master端末で `smoke_gserver_vpn_guard.py` が VERIFY=PASS（peer canary・namespace nft guard・Core不変）。WireGuard実接続・出口IP・DNS/IPv6・性能・cloudflared同一経路は未受入。
+
+## 実WireGuard / cloudflared live smoke（Master端末・sudo必須）
+
+`scripts/smoke_gserver_vpn_live.py` は disposable bundle を1回起動し、Gluetun public IP API（本文はSHA256のみ出力）、Docker embedded DNS拒否、IPv6拒否、VPN stop時のkill switch、任意cloudflaredログ（token非出力）を確認する。Core/Storage/他containerは前後照合し、cleanupで必ずdownする。
+
+前提: owner-only WG profile（`~/.local/state/gserver/vpn-profiles/`）、`set-endpoint-pin` 済み、digest固定image（`hints` / 任意で `pull-reference-images --confirm-registry-pull`）、同一端末 `sudo -v`。cloudflaredは `GSERVER_CLOUDFLARED_CREDENTIAL=/path/to/0600/token-file` を任意指定。
+
+```bash
+cd /home/gace/Project/Gserver/repository
+sudo -v
+python3 -B scripts/gserver_connection_readiness.py --local-status
+python3 -B scripts/smoke_gserver_vpn_live.py
+```
+
+`PERFORMANCE`・Access認証・Webhook E2E・Telegram Bot本体は別Gate。namespace guard kernel smoke PASSをlive smoke PASSと混同しない。

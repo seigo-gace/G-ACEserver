@@ -1,3 +1,12 @@
+# 2026-10-31 Cursor Composer｜VPN/Cloudflare live smoke（Source）
+
+- **実装:** `smoke_gserver_vpn_live.py`（実WireGuard egress・DNS/IPv6拒否・kill switch・任意cloudflared）、`gserver_vpn.py set-endpoint-pin` / `pull-reference-images --confirm-registry-pull` / render時のendpoint-cache利用、`gserver_connection_readiness.py --local-status`。
+- **Source:** VPN関連 **38+ tests PASS**（live smoke契約含む）。**CI未実行**。
+- **Composer Runtime:** sudo cacheなし・`endpoint-cache.json` の jp/kr が空・Gluetun/cloudflared digest未確認のため **live smoke未実行**。kernel guard smoke PASSは維持、実VPN/Cloudflare受入は **NOT_VERIFIED**。
+- **Master Exact Next（1ブロック）:** 下記VPN_RUNTIMEの live smoke 節。Windscribe UIで確認した endpoint IPv4 を `set-endpoint-pin` 後、`pull-reference-images --confirm-registry-pull` → `smoke_gserver_vpn_live.py`。Tunnel tokenは `GSERVER_CLOUDFLARED_CREDENTIAL` のみ。
+
+---
+
 # 2026-10-31 Cursor Composer｜F01/F03/F04 読取専用Gate
 
 - **実装:** `audit_f01_wsl_boot.py`（WSL `[boot] systemd`・systemd unit・`sudo -n docker info`）、`windows_f01_boot_readonly.ps1`（WSL直呼びScheduledTask件数のみ）、`f03_storage_mount_audit.py`（G: mount fingerprint・quota snapshot・USB断試験はNOT_RUN）、`gserver_f04_readiness.py`（mount probe + `kb_source.inspect`）。`verify_gserver_resume.sh` に3 WSL auditを追加。契約テスト9件追加。

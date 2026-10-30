@@ -2,6 +2,7 @@
 """Report credential slots and bundle readiness without live connections or secret output."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -38,15 +39,35 @@ def bundle_state(directory):
     }
 
 
+def local_slot_status():
+    profile_root = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gserver/vpn-profiles'
+    pins = vpn.endpoint_pins()
+    out = {}
+    for region, name in vpn.REGIONS.items():
+        path = profile_root / name
+        out['wireguard_profile_' + region] = 'PRESENT' if path.is_file() and path.stat().st_mode & 0o077 == 0 else 'MISSING'
+        out['endpoint_pin_' + region] = 'CONFIGURED' if region in pins else 'NOT_CONFIGURED'
+    hints = vpn.hints()
+    out['docker_access'] = hints.get('docker_access', 'UNKNOWN')
+    out['vpn_image'] = hints.get('suggested_gluetun_image', 'UNKNOWN')
+    out['cloudflared_image'] = hints.get('suggested_cloudflared_image', 'UNKNOWN')
+    out['core_app_image'] = hints.get('core_app_image', 'UNKNOWN')
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bundle', help='Private VPN bundle directory to validate offline')
+    parser.add_argument('--local-status', action='store_true', help='Summarize owner-local credential slots without secrets')
     args = parser.parse_args()
     print('========== GACE_RESULT_BEGIN ==========')
     print('PROJECT=Gserver')
     print('ACTION=CONNECTION_READINESS_REPORT')
     for slot, purpose, verify in SLOTS:
         print(f'SLOT={slot};PURPOSE={purpose};VERIFY={verify}')
+    if args.local_status:
+        for key, value in sorted(local_slot_status().items()):
+            print(f'LOCAL_{key.upper()}={value}')
     if args.bundle:
         try:
             state = bundle_state(args.bundle)

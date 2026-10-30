@@ -76,7 +76,7 @@ class VPNTests(unittest.TestCase):
         self.write(PROFILE.replace('10.10.0.2/32','10.10.0.2/32, fd00::2/128').replace('93.184.216.34','vpn.example.com'))
         with mock.patch('socket.getaddrinfo', side_effect=AssertionError('DNS forbidden')):
             self.assertEqual(vpn.profile(self.path,'jp')['endpoint'], 'vpn.example.com')
-            with self.assertRaisesRegex(vpn.VPNError, 'PIN_REQUIRED'):
+            with self.assertRaisesRegex(vpn.VPNError, 'ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED'):
                 vpn.render(self.root/'no-pin','jp',self.path,VPN_IMAGE,APP_IMAGE)
             out=self.root/'pinned'
             vpn.render(out,'jp',self.path,VPN_IMAGE,APP_IMAGE,'93.184.216.34')
@@ -251,6 +251,13 @@ class VPNTests(unittest.TestCase):
         with mock.patch.object(vpn, 'ENDPOINT_CACHE', cache):
             pins = vpn.endpoint_pins()
         self.assertEqual(set(pins), {'jp', 'kr'})
+
+    def test_write_endpoint_pin_and_render_from_cache(self):
+        cache = self.root / 'endpoint-cache.json'
+        with mock.patch.object(vpn, 'ENDPOINT_CACHE', cache):
+            vpn.write_endpoint_pin('jp', '93.184.216.34')
+            selected = vpn.render_endpoint_ip('jp', 'vpn.example.com')
+            self.assertEqual(selected, '93.184.216.34')
 
     def test_empty_endpoint_cache_lists_are_unconfigured_not_invalid(self):
         cache = self.root / 'endpoint-cache.json'
