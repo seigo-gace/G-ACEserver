@@ -113,7 +113,10 @@ class VPNTests(unittest.TestCase):
         for p in out.iterdir():
             if p.name != 'wireguard.conf':
                 self.assertNotIn(KEY, p.read_text())
-            self.assertEqual(p.stat().st_mode & 0o077, 0)
+            if p.name == vpn.APP_RESOLV_FILE:
+                self.assertEqual(p.stat().st_mode & 0o777, 0o644)
+            else:
+                self.assertEqual(p.stat().st_mode & 0o077, 0)
         self.assertEqual(set(manifest['acceptance'].values()), {'NOT_VERIFIED'})
 
     def test_cloudflared_shares_vpn_without_compose_secrets(self):
@@ -126,6 +129,18 @@ class VPNTests(unittest.TestCase):
         blob = json.dumps(config)
         self.assertNotIn('eyJ', blob)
         self.assertIn('/run/gserver-tunnel/credential', blob)
+
+    def test_bundle_file_modes_separate_secret_and_resolv(self):
+        out, _ = self.bundle()
+        self.assertEqual(oct((out / 'app-resolv.conf').stat().st_mode & 0o777), '0o644')
+        self.assertEqual(oct((out / 'wireguard.conf').stat().st_mode & 0o777), '0o600')
+        self.assertEqual(oct(out.stat().st_mode & 0o777), '0o700')
+
+    def test_load_rejects_owner_only_resolv_for_config_mount(self):
+        out, _ = self.bundle()
+        (out / vpn.APP_RESOLV_FILE).chmod(0o600)
+        with self.assertRaisesRegex(vpn.VPNError, 'PRIVATE_FILE_PERMISSIONS'):
+            vpn.load(out)
 
     def test_app_sidecar_idle_command_and_vpn_healthcheck(self):
         out, _ = self.bundle()

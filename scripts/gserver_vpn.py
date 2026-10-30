@@ -29,6 +29,14 @@ ENDPOINT_CACHE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local
 TUNNEL_CREDENTIAL = 'cloudflared.credential'
 APP_RESOLV_FILE = 'app-resolv.conf'
 APP_RESOLV = 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'
+APP_RESOLV_VERIFY_PY = (
+    'import os,pathlib,sys\n'
+    'if os.getuid()!=65534:\n sys.exit(5)\n'
+    'lines=[l.strip() for l in pathlib.Path("/etc/resolv.conf").read_text().splitlines()\n'
+    '         if l.strip() and not l.strip().startswith("#")]\n'
+    'if not lines or lines[0]!="nameserver 127.0.0.1":\n sys.exit(3)\n'
+    'if any(l.startswith("nameserver 127.0.0.11") for l in lines):\n sys.exit(4)\n'
+)
 # Sidecar uses the Core image for Python only; do not inherit gserver :8765 healthcheck.
 APP_IDLE_COMMAND = ['python3', '-B', '-c', 'import time\nwhile True:\n time.sleep(3600)\n']
 APP_VPN_HEALTHCHECK = {
@@ -95,6 +103,32 @@ def private_read(path, limit=32768):
             if not 0 < len(data) <= limit:
                 raise VPNError('PRIVATE_FILE_SIZE')
             return path, data
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise VPNError('PRIVATE_FILE_UNAVAILABLE') from exc
+
+
+def read_app_resolv(path, limit=4096):
+    """Read app-resolv.conf: owner-only write, world-readable for non-root Config mounts."""
+    path = Path(path).expanduser().absolute()
+    try:
+        if path.resolve() != path:
+            raise VPNError('PRIVATE_FILE_SYMLINK')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or (info.st_mode & 0o777) != 0o644
+                or info.st_uid != os.geteuid()
+                or info.st_nlink != 1
+            ):
+                raise VPNError('PRIVATE_FILE_PERMISSIONS')
+            data = os.read(fd, limit + 1)
+            if not 0 < len(data) <= limit:
+                raise VPNError('PRIVATE_FILE_SIZE')
+            return data
         finally:
             os.close(fd)
     except OSError as exc:
@@ -430,10 +464,22 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
                 'acceptance': {key: 'NOT_VERIFIED' for key in ('IP', 'NET', 'INGRESS', 'CRYPTO', 'RESPONSE', 'PERFORMANCE', 'OPS')}}
     contents['manifest.json'] = json.dumps(manifest, indent=2) + '\n'
     for key, value in contents.items():
-        fd = os.open(directory / key, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        mode = 0o644 if key == APP_RESOLV_FILE else 0o600
+        fd = os.open(directory / key, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
         with os.fdopen(fd, 'w') as stream:
             stream.write(value)
     return manifest
+
+
+def verify_sidecar_resolv(docker, container_id):
+    """Sidecar UID must read Config-mounted resolv.conf (non-secret, VPN-local nameserver only)."""
+    try:
+        run(
+            docker + ['exec', '-u', '65534:65534', container_id, 'python3', '-B', '-c', APP_RESOLV_VERIFY_PY],
+            step='app_resolv_sidecar_uid',
+        )
+    except VPNError as exc:
+        raise VPNError('APP_RESOLV_NOT_APPLIED', diagnostic=exc.diagnostic) from exc
 
 
 def load(directory):
@@ -448,7 +494,10 @@ def load(directory):
         if set(manifest['hashes']) != {'compose.json', 'guard.nft', 'wireguard.conf', APP_RESOLV_FILE}:
             raise ValueError()
         for name, digest in manifest['hashes'].items():
-            _, raw = private_read(directory / name)
+            if name == APP_RESOLV_FILE:
+                raw = read_app_resolv(directory / name)
+            else:
+                _, raw = private_read(directory / name)
             if hashlib.sha256(raw).hexdigest() != digest:
                 raise ValueError()
         current = profile(manifest['profile']['path'], manifest['profile']['region'])
@@ -708,6 +757,10 @@ def start(directory):
                 diag = project_runtime_diagnostics(docker, compose, manifest['project'])
                 merged = diag if not exc.diagnostic else exc.diagnostic + '; ' + diag
                 raise VPNError(code, diagnostic=merged) from exc
+            app_ids = run(compose + ['ps', '-q', 'app'], step='compose_ps_app_post').split()
+            if len(app_ids) != 1:
+                raise VPNError('APP_CONTAINER_MISSING')
+            verify_sidecar_resolv(docker, app_ids[0])
     except VPNError as exc:
         if created:
             try:

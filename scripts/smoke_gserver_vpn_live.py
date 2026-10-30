@@ -87,17 +87,9 @@ def validate_live_preflight(status, region, *, require_cloudflared=False):
 
 
 def verify_app_resolv_conf(container):
-    """Confirm read-only app received file-based config mount, not merely declared in compose."""
-    code = (
-        "import pathlib,sys\n"
-        "lines=pathlib.Path('/etc/resolv.conf').read_text().splitlines()\n"
-        "ok=bool(lines) and lines[0].strip()=='nameserver 127.0.0.1'\n"
-        "sys.exit(0 if ok else 1)\n"
-    )
-    try:
-        docker('exec', container, 'python3', '-B', '-c', code)
-    except apps.AppError as exc:
-        raise vpn.VPNError('APP_RESOLV_NOT_APPLIED', diagnostic=exc.diagnostic) from exc
+    """Confirm UID 65534 reads Config-mounted resolv.conf (VPN-local DNS, not Docker embedded)."""
+    prefix = (['docker'] if apps.os.geteuid() == 0 else ['sudo', '-n', 'docker']) + ['--host', apps.DOCKER_SOCKET]
+    vpn.verify_sidecar_resolv(prefix, container)
 
 
 def assert_vpn_stop_blocks_publicip(app_id):
@@ -179,6 +171,7 @@ def main():
             app_id = service_container(project, 'app')
             verify_app_resolv_conf(app_id)
             print('APP_RESOLV_CONF_APPLIED=PASS', flush=True)
+            print('APP_DNS_VPN_NAMESERVER=PASS', flush=True)
             phase = 'VPN_EGRESS'
             latencies = []
             digest = ''
