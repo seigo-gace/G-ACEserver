@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Isolated WireGuard + optional cloudflared live acceptance; never redeploy Core."""
+"""Isolated WireGuard egress acceptance; Cloudflare ingress is a separate gate."""
 import contextlib
 import io
+import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -16,36 +18,127 @@ from smoke_gserver_apps_host import docker, inventory, storage, CORE, safe_runti
 PROFILE_ROOT = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gserver/vpn-profiles'
 
 
-def body_sha256(container, url, timeout=15):
-    code = (
-        "import hashlib,sys,urllib.request\n"
-        "url=" + repr(url) + "\n"
-        "timeout=" + str(timeout) + "\n"
-        "with urllib.request.urlopen(url,timeout=timeout) as r:\n"
-        " data=r.read(4096)\n"
-        "print(hashlib.sha256(data).hexdigest())\n"
-    )
-    value = docker('exec', container, 'python3', '-B', '-c', code)
-    digest = value.strip()
-    if not apps.re.fullmatch(r'[a-f0-9]{64}', digest):
-        raise vpn.VPNError('EGRESS_BODY_HASH_INVALID')
-    return digest
+# Fixed public diagnostic endpoints, requested only from the guarded app namespace.
+TRACE_URLS = ('https://1.1.1.1/cdn-cgi/trace', 'https://www.cloudflare.com/cdn-cgi/trace')
+TCP_CANARY = '1.1.1.1'
 
 
-def expect_connect(container, address, port, allowed, family='ipv4'):
-    code = (
-        "import socket,sys\n"
-        "family=" + ('socket.AF_INET' if family == 'ipv4' else 'socket.AF_INET6') + "\n"
-        "s=socket.socket(family,socket.SOCK_STREAM);s.settimeout(3)\n"
-        "try:\n s.connect((" + repr(address) + "," + str(port) + ")); ok=True\n"
-        "except OSError:\n ok=False\n"
-        "finally:\n s.close()\n"
-        "sys.exit(0 if ok==" + repr(allowed) + " else 1)\n"
-    )
+def app_json(container, code):
+    # A failed docker exec must never count as a blocked network probe.
     try:
-        docker('exec', container, 'python3', '-B', '-c', code)
-    except apps.AppError as exc:
-        raise vpn.VPNError('CONNECT_PROBE_FAILED', diagnostic=exc.diagnostic) from exc
+        value = json.loads(docker('exec', '-u', '65534:65534', container, 'python3', '-B', '-c', code))
+    except (ValueError, TypeError) as exc:
+        raise vpn.VPNError('APP_PROBE_REPORT_INVALID') from exc
+    if not isinstance(value, dict):
+        raise vpn.VPNError('APP_PROBE_REPORT_INVALID')
+    return value
+
+
+def https_exit(container, url, region):
+    if url not in TRACE_URLS:
+        raise vpn.VPNError('EGRESS_TARGET_INVALID')
+    code = (
+        "import json,os,urllib.request\n"
+        "class NoRedirect(urllib.request.HTTPRedirectHandler):\n"
+        " def redirect_request(self,*a,**k): return None\n"
+        "opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())\n"
+        "with opener.open(" + repr(url) + ",timeout=12) as r:\n"
+        " if r.status!=200: raise ValueError('HTTP_STATUS')\n"
+        " data=r.read(4097)\n"
+        " if len(data)>4096: raise ValueError('HTTP_BODY_TOO_LARGE')\n"
+        " fields=dict(line.split('=',1) for line in data.decode('ascii').splitlines() if '=' in line)\n"
+        "print(json.dumps({'uid':os.getuid(),'ip':fields.get('ip'),'country':fields.get('loc')}))\n"
+    )
+    result = app_json(container, code)
+    try:
+        address = ipaddress.ip_address(result['ip'])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise vpn.VPNError('EGRESS_IP_INVALID') from exc
+    if result.get('uid') != 65534 or address.version != 4 or not address.is_global:
+        raise vpn.VPNError('EGRESS_IP_INVALID')
+    if result.get('country') != {'jp': 'JP', 'kr': 'KR'}[region]:
+        raise vpn.VPNError('EGRESS_COUNTRY_MISMATCH')
+    return str(address)
+
+
+def tcp_connected(container, address, port, *, ipv6=False):
+    code = (
+        "import errno,json,os,socket\n"
+        "s=socket.socket(" + ('socket.AF_INET6' if ipv6 else 'socket.AF_INET') + ",socket.SOCK_STREAM)\n"
+        "s.settimeout(3)\n"
+        "try:\n s.connect((" + repr(address) + "," + str(port) + "));state='connected'\n"
+        "except OSError as e:\n"
+        " if not isinstance(e,TimeoutError) and e.errno not in (errno.ENETUNREACH,errno.EHOSTUNREACH,errno.EACCES,errno.EPERM,errno.EAFNOSUPPORT,errno.EADDRNOTAVAIL): raise\n"
+        " state='blocked'\n"
+        "finally:\n s.close()\n"
+        "print(json.dumps({'uid':os.getuid(),'state':state}))\n"
+    )
+    result = app_json(container, code)
+    if result.get('uid') != 65534 or result.get('state') not in ('connected', 'blocked'):
+        raise vpn.VPNError('APP_PROBE_REPORT_INVALID')
+    return result['state'] == 'connected'
+
+
+def wireguard_state(container):
+    # Never use dump/showconf/private-key: those include secret material.
+    handshakes = docker('exec', container, 'wg', 'show', 'tun0', 'latest-handshakes').splitlines()
+    transfers = docker('exec', container, 'wg', 'show', 'tun0', 'transfer').splitlines()
+    try:
+        if len(handshakes) != 1 or len(transfers) != 1:
+            raise ValueError()
+        peer, stamp = handshakes[0].split()
+        other, rx, tx = transfers[0].split()
+        stamp, rx, tx = int(stamp), int(rx), int(tx)
+        if peer != other or not 0 <= time.time() - stamp <= 180 or min(rx, tx) < 0:
+            raise ValueError()
+    except (ValueError, TypeError) as exc:
+        raise vpn.VPNError('WIREGUARD_HANDSHAKE_OR_COUNTER_INVALID') from exc
+    return peer, rx, tx
+
+
+def app_guard(container):
+    state = json.loads(docker('inspect', container))[0]['State']
+    if not state.get('Running') or not isinstance(state.get('Pid'), int) or state['Pid'] <= 1:
+        raise vpn.VPNError('APP_NOT_RUNNING')
+    return vpn.namespace_guard(state['Pid'])
+
+
+def unchanged_guard(before, after):
+    if before['inode'] != after['inode'] or vpn.policy_fingerprint(before) != vpn.policy_fingerprint(after):
+        raise vpn.VPNError('APP_NAMESPACE_OR_GUARD_CHANGED')
+
+
+def dns_drop_packets(report, protocol):
+    rules = [item['rule'] for item in report['nft'].get('nftables', [])
+             if 'rule' in item and item['rule'].get('comment') == 'gserver_dns_' + protocol]
+    if len(rules) != 1:
+        raise vpn.VPNError('DNS_GUARD_COUNTER_MISSING')
+    values = [expr['counter']['packets'] for expr in rules[0].get('expr', []) if 'counter' in expr]
+    if len(values) != 1 or not isinstance(values[0], int):
+        raise vpn.VPNError('DNS_GUARD_COUNTER_MISSING')
+    return values[0]
+
+
+def verify_network_guards(container):
+    before = app_guard(container)
+    if tcp_connected(container, '127.0.0.11', 53):
+        raise vpn.VPNError('DOCKER_DNS_TCP_LEAK')
+    result = app_json(container,
+        "import json,os,socket\n"
+        "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)\n"
+        "s.sendto(bytes.fromhex('123401000001000000000000076578616d706c6503636f6d0000010001'),('127.0.0.11',53))\n"
+        "s.close()\nprint(json.dumps({'uid':os.getuid(),'sent':True}))\n")
+    if result.get('uid') != 65534 or result.get('sent') is not True:
+        raise vpn.VPNError('APP_PROBE_REPORT_INVALID')
+    after = app_guard(container)
+    unchanged_guard(before, after)
+    for protocol in ('udp', 'tcp'):
+        if dns_drop_packets(after, protocol) <= dns_drop_packets(before, protocol):
+            raise vpn.VPNError('DNS_GUARD_DROP_NOT_OBSERVED')
+    result = app_json(container,
+        "import json,pathlib\nprint(json.dumps({'disabled':pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip()}))\n")
+    if result.get('disabled') != '1' or tcp_connected(container, '2606:4700:4700::1111', 443, ipv6=True):
+        raise vpn.VPNError('IPV6_NOT_BLOCKED')
 
 
 def service_container(project, service):
@@ -93,16 +186,9 @@ def verify_app_resolv_conf(container):
 
 
 def assert_vpn_stop_blocks_publicip(app_id):
-    """Fail closed: any successful public IP read after VPN stop is a kill-switch leak."""
-    try:
-        body_sha256(app_id, 'http://127.0.0.1:8000/v1/publicip/ip', timeout=5)
-    except apps.AppError:
-        return
-    except vpn.VPNError as exc:
-        if str(exc) == 'KILL_SWITCH_LEAK':
-            raise
-        return
-    raise vpn.VPNError('KILL_SWITCH_LEAK')
+    """Check a real public TCP socket; exec/report errors propagate as failures."""
+    if tcp_connected(app_id, TCP_CANARY, 443):
+        raise vpn.VPNError('KILL_SWITCH_LEAK')
 
 
 def live_failure_detail(exc):
@@ -124,13 +210,14 @@ def main():
     failure = None
     created = False
     project = None
-    compose_cmd = None
     before = None
     storage_before = None
     print('========== GACE_RESULT_BEGIN ==========\nPROJECT=Gserver\nACTION=PC_VPN_CLOUDFLARE_LIVE_SMOKE', flush=True)
     with tempfile.TemporaryDirectory(prefix='gserver-vpn-live-') as workspace:
         bundle = Path(workspace) / 'bundle'
         try:
+            if tunnel_cred:
+                raise vpn.VPNError('CLOUDFLARE_REQUIRES_SEPARATE_AUTHORIZED_GATE')
             before = inventory()
             info = json.loads(docker('inspect', CORE))[0]
             if info['State'].get('Health', {}).get('Status') != 'healthy':
@@ -147,23 +234,15 @@ def main():
                 require_cloudflared=bool(tunnel_image and tunnel_cred),
             )
             phase = 'RENDER_BUNDLE'
-            use_tunnel = bool(tunnel_image and tunnel_cred)
             manifest = vpn.render(
                 bundle,
                 region,
                 profile,
                 vpn_image,
                 app_image,
-                cloudflared_image=tunnel_image if use_tunnel else None,
+                cloudflared_image=None,
             )
             project = manifest['project']
-            if use_tunnel:
-                src = Path(tunnel_cred).expanduser()
-                if not src.is_file() or src.stat().st_mode & 0o077:
-                    raise vpn.VPNError('CLOUDFLARED_CREDENTIAL_MISSING')
-                dst = bundle / vpn.TUNNEL_CREDENTIAL
-                dst.write_bytes(src.read_bytes())
-                dst.chmod(0o600)
             phase = 'START_BUNDLE'
             created = True
             with contextlib.redirect_stdout(io.StringIO()):
@@ -173,40 +252,40 @@ def main():
             print('APP_RESOLV_CONF_APPLIED=PASS', flush=True)
             print('APP_DNS_VPN_NAMESERVER=PASS', flush=True)
             phase = 'VPN_EGRESS'
+            vpn_id = service_container(project, 'vpn')
+            wg_before = wireguard_state(vpn_id)
             latencies = []
-            digest = ''
-            for _ in range(3):
+            exits = []
+            for url in TRACE_URLS:
                 start = time.monotonic()
-                digest = body_sha256(app_id, 'http://127.0.0.1:8000/v1/publicip/ip')
+                exits.append(https_exit(app_id, url, region))
                 latencies.append(str(round(time.monotonic() - start, 3)))
-            print('VPN_PUBLICIP_BODY_SHA256=' + digest, flush=True)
-            print('VPN_PUBLICIP_LATENCY_SAMPLES_SEC=' + ','.join(latencies), flush=True)
+            wg_after = wireguard_state(vpn_id)
+            if exits[0] != exits[1]:
+                raise vpn.VPNError('EGRESS_IP_CHANGED_DURING_PROBE')
+            if wg_before[0] != wg_after[0] or any(wg_after[i] <= wg_before[i] for i in (1, 2)):
+                raise vpn.VPNError('WIREGUARD_TRANSFER_NOT_OBSERVED')
+            print('VPN_EXIT_IP_SHA256=' + hashlib.sha256(exits[0].encode('ascii')).hexdigest(), flush=True)
+            print('VPN_HTTPS_LATENCY_SAMPLES_SEC=' + ','.join(latencies), flush=True)
+            print('APP_HTTPS_LITERAL_AND_DNS=PASS', flush=True)
+            print('VPN_EXIT_COUNTRY=' + region.upper(), flush=True)
             print('WIREGUARD_CONNECTION=PASS', flush=True)
             print('WAN_PACKETS=SENT_VIA_VPN_NAMESPACE', flush=True)
             phase = 'NET_GUARDS'
-            expect_connect(app_id, '127.0.0.11', 53, False)
-            print('DOCKER_EMBEDDED_DNS_BLOCKED=PASS', flush=True)
-            expect_connect(app_id, '::1', 80, False, family='ipv6')
-            print('IPV6_EGRESS_BLOCKED=PASS', flush=True)
+            verify_network_guards(app_id)
+            print('DOCKER_EMBEDDED_DNS_UDP_TCP_BLOCKED=PASS', flush=True)
+            print('IPV6_DISABLED_AND_PUBLIC_CONNECT_BLOCKED=PASS', flush=True)
             phase = 'KILL_SWITCH'
+            if not tcp_connected(app_id, TCP_CANARY, 443):
+                raise vpn.VPNError('KILL_SWITCH_POSITIVE_CONTROL_FAILED')
+            guard_before = app_guard(app_id)
             docker('compose', '--project-name', project, '--project-directory', str(bundle),
                    '--env-file', '/dev/null', '-f', str(bundle / 'compose.json'),
                    'stop', '--timeout', '10', 'vpn')
             assert_vpn_stop_blocks_publicip(app_id)
-            print('VPN_KILL_SWITCH=PASS', flush=True)
-            phase = 'CLOUDFLARE'
-            if use_tunnel:
-                ids = docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + project,
-                             '--filter', 'label=com.docker.compose.service=cloudflared').split()
-                if len(ids) != 1:
-                    raise vpn.VPNError('CLOUDFLARED_CONTAINER_MISSING')
-                logs = docker('logs', '--tail', '40', ids[0])
-                if 'token' in logs.lower() or 'Authorization' in logs:
-                    raise vpn.VPNError('CLOUDFLARED_LOG_SECRET_RISK')
-                state = 'CONNECTED' if any(marker in logs for marker in ('Registered tunnel connection', 'Connection')) else 'NOT_VERIFIED'
-                print('CLOUDFLARE_TUNNEL=' + state, flush=True)
-            else:
-                print('CLOUDFLARE=SKIPPED_NO_LOCAL_IMAGE_OR_CREDENTIAL', flush=True)
+            unchanged_guard(guard_before, app_guard(app_id))
+            print('VPN_KILL_SWITCH_PUBLIC_TCP=PASS', flush=True)
+            print('CLOUDFLARE=NOT_RUN_SEPARATE_AUTHORIZED_GATE', flush=True)
             print('PERFORMANCE=NOT_VERIFIED', flush=True)
         except (apps.AppError, vpn.VPNError, OSError, ValueError, KeyError, TypeError) as exc:
             failure = phase
@@ -232,7 +311,7 @@ def main():
                     failure = failure or 'EXISTING_CONTAINER_READBACK'
     print('ACCEPTANCE_KERNEL_GUARD=NOT_THIS_SCRIPT')
     print('ACCEPTANCE_LIVE_VPN=' + ('FAIL' if failure else 'PASS'))
-    print('ACCEPTANCE_CLOUDFLARE=' + ('NOT_RUN' if failure else 'PARTIAL_OR_SKIPPED'))
+    print('ACCEPTANCE_CLOUDFLARE=NOT_RUN')
     print('VERIFY=' + ('FAIL' if failure else 'PASS'))
     print('ERROR=' + ('LIVE_' + failure if failure else 'NONE'))
     print('EXIT_CODE=' + ('1' if failure else '0'))

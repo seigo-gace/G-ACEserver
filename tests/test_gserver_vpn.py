@@ -198,7 +198,7 @@ class VPNTests(unittest.TestCase):
     def test_direct_dns_ipv6_and_wan_are_not_generally_allowed(self):
         rules = vpn.guard_rules('93.184.216.34', 51820)
         self.assertIn('policy drop', rules)
-        self.assertIn('127.0.0.11 udp dport 53 drop', rules)
+        self.assertIn('127.0.0.11 udp dport 53 counter drop', rules)
         self.assertNotIn('ct state established', rules)
         physical = [line for line in rules.splitlines() if 'eth0' in line]
         self.assertEqual(len(physical), 1)

@@ -194,8 +194,8 @@ def guard_rules(endpoint, port):
     return f'''table inet {GUARD} {{
  chain output {{
   type filter hook output priority -200; policy drop;
-  ip daddr 127.0.0.11 udp dport 53 drop
-  ip daddr 127.0.0.11 tcp dport 53 drop
+  ip daddr 127.0.0.11 udp dport 53 counter drop comment "gserver_dns_udp"
+  ip daddr 127.0.0.11 tcp dport 53 counter drop comment "gserver_dns_tcp"
   oifname "lo" ip daddr 127.0.0.0/8 accept
   oifname "tun0" meta nfproto ipv4 accept
   oifname "eth0" ip daddr {ip} udp dport {int(port)} accept

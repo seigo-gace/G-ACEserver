@@ -66,27 +66,25 @@ Gluetun公式Sourceはrepository IDを維持して `passteque/gluetun` へ移行
 
 **2026-10-31 PC実機:** Master端末で `smoke_gserver_vpn_guard.py` が VERIFY=PASS（peer canary・namespace nft guard・Core不変）。WireGuard実接続・出口IP・DNS/IPv6・性能・cloudflared同一経路は未受入。
 
-## 実WireGuard / cloudflared live smoke（Master端末・sudo必須）
+## 実WireGuard出口受入（2026-10-31 Codex R15）
 
-`scripts/smoke_gserver_vpn_live.py` は disposable bundle を1回起動し、Gluetun public IP API（本文はSHA256のみ出力）、Docker embedded DNS拒否、IPv6拒否、VPN stop時のkill switch、任意cloudflaredログ（token非出力）を確認する。Core/Storage/他containerは前後照合し、cleanupで必ずdownする。
+`scripts/verify_vpn_live_host.sh` は重点テスト→同一端末sudo本人認証→秘密を出さないreadiness→`smoke_gserver_vpn_live.py`を実行する。JPのみの受入にはKR pinを要求しない。両profileはowner-only 0600、bundle0700、非秘密app DNSファイル0644を維持する。既存Coreの停止・再配置、image pull/build、Host Firewall変更は行わない。試験専用projectだけ起動・停止・cleanupし、Core/Storage/既存containerを前後照合する。
 
-前提: owner-only WG profile（`~/.local/state/gserver/vpn-profiles/`）、`set-endpoint-pin` 済み、digest固定image（`hints` / 任意で `pull-reference-images --confirm-registry-pull`）、同一端末 `sudo -v`。cloudflaredは `GSERVER_CLOUDFLARED_CREDENTIAL=/path/to/0600/token-file` を任意指定。
+Gluetun loopback APIはアプリhealthにだけ使用し、外向き通信・Kill Switchの受入根拠にしない。R15の実測は次の範囲を対象とする。
+
+- UID65534 appから固定public IPv4 HTTPSと名前付きHTTPSを実行。標準TLS検証、環境Proxy無効、redirect拒否、本文サイズ制限を適用する。出口public IPv4・JP/KR地域一致を検査し、IP本文は表示しない。診断先はCloudflareの公式`/cdn-cgi/trace`であり、所有zone/Tunnel/Accessの操作ではない。
+- `wg show tun0 latest-handshakes` / `transfer` のみを非表示で読取。直近handshakeと試験前後の受信・送信量増加を確認する。秘密が出る`dump`/`showconf`は使用しない。
+- Docker組込DNSへのUDP/TCP試験送信が、それぞれ独立nft drop counterへ計上されることを確認する。namespace IPv6無効化とpublic IPv6宛TCP遮断を確認する。閉じたloopback portをIPv6遮断の根拠にしない。
+- 同じappからpublic IPv4 TCP到達が成功することを確認してからVPNを停止し、同じ宛先の遮断を再試験する。appが動いていること・同一namespace/guard不変も照合する。Docker exec失敗・不正なJSON・不明な試験状態はFAIL。
 
 ```bash
-cd /home/gace/Project/Gserver/repository
-sudo -v
-python3 -B scripts/gserver_connection_readiness.py --local-status
-python3 -B scripts/smoke_gserver_vpn_live.py
+GSERVER_VPN_REGION=jp GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh"
 ```
 
-`PERFORMANCE`・Access認証・Webhook E2E・Telegram Bot本体は別Gate。namespace guard kernel smoke PASSをlive smoke PASSと混同しない。
+これは**実機で実行して成功した範囲だけ**が受入となる。少数HTTPSの応答時間は性能目標の合否判定ではない。DNS全経路・Proxy/SSRF・実媒体・切替/再接続・速度/安定性・復元・F01〜F08の総合受入は別途必要。
 
-**Master 1コマンド:** `bash scripts/verify_vpn_live_host.sh`（事前に `set-endpoint-pin` と digest 固定 image。KR pin は KR 実行時のみ必須）。
+Cloudflare ingressは別Gate。以前の任意credential投入では本番Tunnelへ試験replicaが参加し得るため、この出口試験ではcredential指定を拒否する。所有zone、既存契約、隔離Tunnel、Access拒否/許可、connector DNS/起動方式を確認してから統合する。既存rendererのcloudflared scaffoldは実稼働受入済みではない。既存Cloudflareを変更せず、Asteraゾーンを流用しない。
 
-**Kill Switch 試験:** VPN service `stop` 後に public IP API へ到達**成功**した場合のみ `KILL_SWITCH_LEAK` で FAIL。接続失敗のみ PASS（`assert_vpn_stop_blocks_publicip`）。`KILL_SWITCH_LEAK` を broad `except` で握りつぶさない。
+Gluetun v3.41.3は起動時に`/etc/passwd`へ書くためVPNサービスだけread_onlyを解除している。app/cloudflaredのread_only、capability制限、guardは維持。appはCore imageをPython実行体として再利用し、Coreのhealthcheck/Workerは起動しない。DNS Configは`app-resolv.conf`をfile方式で適用し、UID65534で実読取を検査する。失敗時はcleanup前のState/Health/秘匿診断を取得する。
 
-**read_only 責務:** Gluetun v3.41.3 は起動時に内部ユーザ作成で `/etc/passwd` へ書くため **vpn サービスだけ read_only 不可**。app/cloudflared は read_only のまま。書込みは tmpfs（`/tmp`, `/gluetun`, guard marker）と Gluetun 既定パスに限定され、nft guard・NET_ADMIN・非root app は維持。
-
-**Compose Config（Docker 5.6 / read_only app）:** read_only サービスへ inline `configs.content` は不可。**bundle 内 `app-resolv.conf`（0644、非秘密）を `configs.file` で `/etc/resolv.conf` にマウント**。bundle ディレクトリは 0700、wireguard/credential は 0600。`verify_sidecar_resolv` は **UID 65534** で `nameserver 127.0.0.1` を読み取り、`127.0.0.11` が無いことを確認（Docker 組込 DNS 迂回なし）。
-
-**app sidecar:** Core digest image は Python 実行体のみ。gserver `:8765` healthcheck は継承しない。`command` は idle loop、healthcheck は共有 netns 内 `127.0.0.1:8000` Gluetun API 到達。`start()` 失敗時は cleanup 前に vpn/app State・Health・ログ・compose ps を sanitize して `VPNError.diagnostic` へ付与（`APP_HEALTHCHECK_*` / `APP_CONTAINER_EXITED` 等）。
+公式根拠: [Cloudflare /cdn-cgi endpoint](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)、[WireGuard tools wg manual](https://git.zx2c4.com/wireguard-tools/tree/src/man/wg.8)。

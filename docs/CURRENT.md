@@ -1,3 +1,15 @@
+# 2026-10-31 Codex継続｜最新引継ぎ照合・VPN実機受入の判定修正
+
+- **正本/場所:** Rule #16、Issue #9、[最新委任](https://github.com/seigo-gace/G-ACEserver/pull/15#issuecomment-6535675565)を取得。D側既存checkout/branchのHEADとGitHub headが`ed111a3`で一致。worktreeは既存1件、stashなし。開始時の未追跡空ファイル`FETCH_HEAD`は既存物として保持。別writerの変更は検出せず、Codexがこの既存branchのVPN受入修正を担当。G旧copyは無変更。
+- **維持した実績:** generic app共存/永続化/rollback、kernel guard、電源断後Core/Storage/SQLiteは以前のMaster実機PASS報告として維持。現在の実機PASSを取り直したとはしない。F01〜F08/46タスク維持、F04は後回し。
+- **現物照合:** JP/KR private profileの権限・構文検証PASS（秘密値非表示）、JP endpoint pin設定あり、KRは未設定。`ed111a3`の非秘密DNS0644/secret0600/UID65534実読取修正をSourceで確認。実appへの適用確認は実機待ち。
+- **R15設計/修正:** 内部APIのキャッシュ応答や停止を実通信/Kill Switchの根拠にしていた試験を修正。appから実HTTPS、WG直近handshake/転送量増加、DNS UDP/TCP drop counter、IPv6無効化/public宛遮断、同じappの停止前public TCP成功→VPN停止後遮断とnamespace/guard不変を確認する。execエラー・不正結果・拒否応答を遮断PASSにしない。Cloudflare credentialをこの出口試験へ投入しない（本番Tunnel replica参加防止）。[R15](handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)、[実行契約](architecture/VPN_RUNTIME.md)参照。
+- **検証:** 確定Sourceの全回帰292 tests PASS、VPN/guard/live/F01重点73 tests PASS、shell構文・diff check PASS。既知F01単体テストのread-only Path属性mockを一時ファイルによる実パーサ検査へ修正。CIはNOT_RUN。実Docker/netns/WireGuardの新規PASSは記録していない。Core app/Dockerfile/deployに差分なし。
+- **Runtime制約:** このCodexシェルの`sudo -n`はpassword required。認証を迂回せず、本人の同一WSL端末で既存wrapperを実行する。Core/Storage/Host firewall/Windows/Cloudflare/Vault/Contaboは操作していない。日本VPNの実機受入は未完了。KR、復旧/速度/安定性、Cloudflare Tunnel/Access/connector DNS/起動方式、媒体、Vault等も未受入。Draft維持。
+- **Exact Next:** `GSERVER_VPN_REGION=jp GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh"`。Masterの本人sudo認証が必要なのは実機実行だけ。返却されたphase/codeをCodexが解析・修正し、元のJP受入へ戻る。JP後にKR/復旧/性能とCloudflareを順次検証。SourceテストとRuntimeを混同しない。
+
+---
+
 # 2026-10-31 Cursor Composer｜VPN根本監査・Kill Switch修復
 
 - **確定不具合:** live smoke の Kill Switch 段階が `KILL_SWITCH_LEAK` を broad `except` で捕捉し **漏洩を PASS 化**していた → `assert_vpn_stop_blocks_publicip()` に分離・回帰テスト追加。

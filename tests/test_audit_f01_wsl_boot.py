@@ -1,5 +1,6 @@
 """Unit tests for read-only F01 WSL boot audit helpers."""
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,12 +13,11 @@ import audit_f01_wsl_boot as f01
 
 class F01WslBootAudit(unittest.TestCase):
     def test_read_wsl_conf_parses_boot_systemd(self):
-        with patch.object(f01.WSL_CONF, "is_file", return_value=True), patch.object(
-            f01.WSL_CONF,
-            "read_text",
-            return_value="[boot]\nsystemd=true\n# comment\n",
-        ):
-            parsed = f01.read_wsl_conf()
+        with tempfile.TemporaryDirectory() as root:
+            conf = Path(root) / 'wsl.conf'
+            conf.write_text('[boot]\nsystemd=true\n# comment\n')
+            with patch.object(f01, 'WSL_CONF', conf):
+                parsed = f01.read_wsl_conf()
         self.assertEqual(parsed["boot_systemd"], "true")
 
     def test_audit_passes_when_stack_ready(self):
