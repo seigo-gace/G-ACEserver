@@ -1,4 +1,9 @@
 # Gserver 最終完成条件｜F01～F08
+
+## 2026-10-31 通信保護の必須要件（F02/F06/F07/F08）
+
+保護対象appのBot API/媒体/関連通信とcloudflared→Cloudflare接続をWindscribe WireGuard日本通常/韓国予備へ固定し、自宅IPの不要な露出を防ぐ。Firewall/Kill Switch・DNS/IPv6/Proxy漏洩防止、Webhook認証・Cloudflare既存防御維持、Vault正式契約/暗号化/鍵保護、攻撃隔離・復旧・必要速度を全て実証する。[統合設計v3](../handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)のGateを適用。速度未達・漏洩未検証・VPN断のdirect fallbackは不合格。Gserverは汎用Host、独立appを専用Coreへ組み込まない。Contaboは今回不使用。F05の正式バックアップ要件は維持し、今回未実施を消さない。
+
 文書状態：GOAL FIXED / CORE・STORAGE一部実機PASS / 全体受入未完了。
 
 ## 2026-10-30 目的・受入の補正

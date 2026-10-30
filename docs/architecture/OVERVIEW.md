@@ -61,3 +61,7 @@ Web公開はまず既存サイト入口とaaPanel等の実依存を絞って確�
 
 ## ファイル配置方針
 Compose定義・実行コード/image build設定はLinux FS上で管理、コンテナ内実行依存はimageに閉じる。状態DB/索引/ログ/spoolはホスト要件に適した永続volume、G:は大容量データ、F:は原本。旧G:試験コードと提案されたLinux配置の実一致は不明なのでS1で現物確認後にFileTreeを確定。実行プロセス・port・秘密値は公開Repoへ記載しない。
+
+## 2026-10-31 通信保護の採用差分
+
+保護対象appとcloudflaredの出口をVPNへ固定し、Core/Storage/Windows/LANの通常運転から分離する。[引継ぎv3](../handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)のレビューR01〜R11・適用Gateを優先。Cloudflareに対するIP秘匿を任意の後段事項として扱わない。既存app管理の隔離を緩めず、VPN専用構成だけに限定した権限を持たせる。設計反映は実機保護完了ではない。

@@ -1,4 +1,5 @@
 # G-ACEserver｜Codex 実行入口
+> **2026-10-31 最新:** D側WSL ext4の既存作業領域を編集元とする（G側旧copyは保持、二重編集禁止）。[通信保護引継ぎv3](docs/handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md#9-codex再レビュー採用修正-v32026-10-31実装に先行)を適用。対象appとcloudflared双方のVPN経由・IP秘匿・既存防御維持・速度/復旧は必須受入。ローカルCore確認と外部通信保護完成は別判定。Contabo不使用、他app/共有提供元の変更なし。
 > **2026-10-30 最新目的:** 下記「Master最新優先」と `docs/CURRENT.md` 冒頭を優先。汎用アプリ運用を完成させる。旧引継ぎのBot/TGS先行・古い実機状態は現行指示ではない。
 > **2026-10-27 Master明示委任｜Gserver開発継続:** [Codex実行引継ぎ](docs/CODEX_HANDOFF_2026-10-27.md) は実機履歴・最終F01～F08・保護境界の参考。現在の再開点は10/30 Currentを確認する。1回の対話セッションでGserver実装と検証を継続する許可であり、定期実行/別AI起動/本番Host変更の許可ではない。古いCurrent記録より新しい実測を優先する。
 
