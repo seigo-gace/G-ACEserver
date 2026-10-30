@@ -64,3 +64,37 @@ MasterがWindscribe Build A Plan の **日本 Tokyo - Shinkansen、韓国 Seoul 
 **停止・承認境界**: Cloudflare別ゾーンの新利用/共有Gateway提供元変更/新公開面/秘密の境界変更など保護対象だけは明示承認なしに実行しない。他の通常開発と分離試験は継続する。GPT CHATからCodexへの追加起動は行っていない。
 
 **完了条件**: Telegram送信・受信・ファイル送受信の全実経路で保護を実証し、VPN断でも自宅IPへfallbackせず、既存Gserverへ支障を出さず、性能測定・復旧・rollback証拠を残す。未検証をPASSにしない。
+
+## 7. 2026-10-30 Master追補：Gserver VPN / ドメイン接続境界のみ
+
+**本追補のスコープ**：Gserverに関わるVPN egress、受信用Domain/Ingress、Cloudflareアカウント間の所有権境界のみ。GateApp-Bot、Tumblr、SalesBot、UserBot各Projectの設計・実装・Currentは変更しない。参照した GateApp-Bot Issue #8 はドメイン区分の照合資料であり、他Projectへ追加実装を依頼するものではない。
+
+### 確定した用途分離（メールアドレスは非掲載）
+
+| Domain / zone | 用途 | 管理境界 |
+| --- | --- | --- |
+| `g-acebot.com` | 個人・会社・G-ACE系。Gserver共通基盤の候補 | A |
+| `asterav8.jp` | Astera専用。Gserver一般用途の新規利用は禁止（個別承認時のみ例外） | B |
+| `hentaigay.org` | Telegram／Tumblr専用。該当Gserver入口の候補 | C |
+
+A/B/Cは論理的な所有・認証境界の識別子。**実CloudflareアカウントID、Zone ID、同一／別アカウント実態、DNS/Tunnel/Accessの配置・稼働状態は未実測**。異なる境界として設計し、接続・権限は実権限を照合してから変更する。管理メール、アカウントID、Token、Tunnel Secret、WireGuard鍵は公開GitHubへ記載しない。
+
+### Gserver実装責務とドメイン可変化
+
+- Gserverのサービス内に `asterav8.jp` 等のFQDN、Zone ID、Cloudflare Account ID、Tunnel ID、Webhook URLをハードコードしない。既存設定をいきなり消去・置換もしない。
+- 各受信入口・サービスに `ingress_ref`（内部識別子）を設け、**サービス論理名 → 許可済みFQDN/Tunnel/認証プロファイル**を既存の設定/Secret管理層で解決する。例：`telegram_webhook_ingress` は採用した認証済み zone C のホスト名へ、`gserver_common_ingress` は採用した zone A のホスト名へ。これは設計上の識別子例であり新規API/DB/必須管理UIの追加指示ではない。
+- Zone別にAccount/Zone/Token/Tunnel/Access Policyの権限とSecretを分離し、アカウント横断の万能Tokenを作らない。Gserver自身のサービスidentityとWebhook検証Secretも分離する。環境差分（dev/staging/production）に合わせて設定を切替可能にする。
+- ドメインの変更は **設定マッピング＋DNS/Tunnel/Access＋Webhook callback登録** の一貫した変更単位として扱う。構造に依存しないよう接続面を抽象化するが、新しいドメインへ無承認に本番通信を送らない。
+- 切替手順は現行経路read-only棚卸 → 新zoneの権限確認 → 変更前後のDNS/TLS/Tunnel/Webhook認証/オリジン非公開/送受信/rollback検証 → 明示承認済みの切替 → 実Runtime readback。両経路の並行運用も具体的に承認された期間/用途だけに限る。旧経路の自動削除なし。
+- **Gserver VPNとの接続境界**：Windscribe日本通常/韓国予備の外向きBot通信はWireGuardの独立したEgressで保護。受信Webhook/TunnelとVPN出口は別責務。Ingress経路の応答やTunnel制御接続がVPN Kill Switchに遮断されたり、例外規則が直接WANの抜け道になったりしないことを実機で証明する。
+- Telegram／Tumblr固有の業務機能・各Botの移行や構造変更は別オーナー。Gserver側は許可済みのホスト／API／Webhook契約を接続するだけ。TGserver、Vault、Webhook Gateway、DebugAI等の `g-acebot.com` への移行は未決定であり、今回行わない。
+
+### Codex向け最小受入追加
+
+1. `IN-DOM-01`: Gserverで利用するIngress/Endpointの現在のzone、Owner、認証、DNS/Tunnel参照を read-only で確認。値/機密は外部公開しない。
+2. `IN-DOM-02`: Domain変更をアプリソースのFQDN書換え無しで設定だけで表現できること（mock/fake endpointによるオフラインテスト）。既存運用とBackward Compatibilityを維持。
+3. `IN-DOM-03`: Domain/Zone A/B/CのToken交差使用、未許可zoneへの流用を拒否するテスト。
+4. `IN-DOM-04`: VPN切断・日本韓国切替時、GserverのWebhook受信／応答とTunnel必要経路が維持され、保護対象BotのVPN外Egressが0件。具体的な許可最小化と実Hostのpacket/route観測で検証。
+5. `IN-DOM-05`: 新Domainを実採用する場合だけ、DNS/TLS/Tunnel/Access/Webhookの登録・切替・復旧を実証。現時点は未承認・未設定・未実測。
+
+**現在の実行状態**：GitHubへの設計引継ぎのみ。Cloudflare、Windows、WSL、Docker、Windscribe設定の変更、Codex新規起動、Runtime検証はいずれも実施していない。既存Gserver Current #9 と既存Codex主担当/Mutation Ownerを維持する。
