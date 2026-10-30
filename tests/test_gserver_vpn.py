@@ -253,10 +253,15 @@ class VPNTests(unittest.TestCase):
         self.assertEqual(set(pins), {'jp', 'kr'})
 
     def test_preflight_reports_missing_local_image(self):
-        with mock.patch.object(vpn, 'run', side_effect=vpn.VPNError('LOCAL_COMMAND_FAILED')):
-            with self.assertRaises(vpn.VPNError) as error:
-                vpn.inspect_local_image(VPN_IMAGE, [])
-        self.assertEqual(str(error.exception), 'LOCAL_PINNED_IMAGE_MISSING')
+        with mock.patch.object(vpn, 'docker_access', return_value='OK'), \
+             mock.patch.object(vpn, 'run', side_effect=vpn.VPNError('LOCAL_COMMAND_FAILED')):
+            status = vpn.preflight(VPN_IMAGE)
+        self.assertEqual(status['vpn'], 'LOCAL_PINNED_IMAGE_MISSING')
+
+    def test_preflight_rejects_unpinned_image_reference(self):
+        with mock.patch.object(vpn, 'docker_access', return_value='OK'):
+            status = vpn.preflight('qmcgaw/gluetun:latest')
+        self.assertEqual(status['vpn'], 'IMMUTABLE_IMAGE_REQUIRED')
 
     def test_existing_network_is_refused_without_container_or_image_changes(self):
         out, manifest = self.bundle()

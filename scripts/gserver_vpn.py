@@ -200,13 +200,36 @@ def inspect_local_image(image, privilege):
     return 'LOCAL_PINNED_IMAGE_PRESENT'
 
 
+def docker_access(privilege):
+    try:
+        if privilege:
+            run(privilege + ['-n', 'true'])
+        run(privilege + ['docker', '--host', SOCKET, 'info'], timeout=30)
+    except VPNError:
+        return 'DOCKER_SUDO_AUTH_REQUIRED'
+    return 'OK'
+
+
+def local_image_status(image, privilege):
+    try:
+        pinned(image)
+    except VPNError:
+        return 'IMMUTABLE_IMAGE_REQUIRED'
+    try:
+        run(privilege + ['docker', '--host', SOCKET, 'image', 'inspect', image])
+    except VPNError:
+        return 'LOCAL_PINNED_IMAGE_MISSING'
+    return 'LOCAL_PINNED_IMAGE_PRESENT'
+
+
 def preflight(vpn_image, app_image=None, cloudflared_image=None):
-    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
-    status = {'vpn': inspect_local_image(vpn_image, privilege)}
+    privilege = [] if os.geteuid() == 0 else ['sudo']
+    status = {'docker_access': docker_access(privilege)}
+    status['vpn'] = local_image_status(vpn_image, privilege)
     if app_image:
-        status['app'] = inspect_local_image(app_image, privilege)
+        status['app'] = local_image_status(app_image, privilege)
     if cloudflared_image:
-        status['cloudflared'] = inspect_local_image(cloudflared_image, privilege)
+        status['cloudflared'] = local_image_status(cloudflared_image, privilege)
     for region in REGIONS:
         status['endpoint_pin_' + region] = 'NOT_CONFIGURED'
     try:
@@ -217,6 +240,41 @@ def preflight(vpn_image, app_image=None, cloudflared_image=None):
     except VPNError:
         status['endpoint_cache'] = 'INVALID'
     return status
+
+
+def hints():
+    """Non-secret local inventory hints for building pinned image references."""
+    privilege = [] if os.geteuid() == 0 else ['sudo']
+    if docker_access(privilege) != 'OK':
+        return {'docker_access': 'DOCKER_SUDO_AUTH_REQUIRED'}
+    out = {'docker_access': 'OK'}
+    core = 'gace-gserver-gserver-1'
+    try:
+        raw = run(privilege + ['docker', '--host', SOCKET, 'inspect', core, '--format', '{{.Image}}'])
+        image = raw.strip()
+        if IMAGE.fullmatch(image):
+            out['core_app_image'] = image
+        elif re.fullmatch(r'sha256:[a-f0-9]{64}', image):
+            out['core_app_image'] = image
+        else:
+            out['core_app_image'] = 'UNPINNED_LOCAL_ID'
+    except VPNError:
+        out['core_app_image'] = 'CORE_CONTAINER_NOT_FOUND'
+    try:
+        lines = run(privilege + ['docker', '--host', SOCKET, 'images', '--digests', '--format',
+                                 '{{.Repository}}@{{.Digest}}']).splitlines()
+        for name in ('gluetun', 'cloudflared'):
+            matches = [line for line in lines if line.startswith('qmcgaw/' + name + '@sha256:')
+                       or line.startswith('cloudflare/' + name + '@sha256:')
+                       or line.startswith('passteque/' + name + '@sha256:')]
+            out[name + '_candidates'] = str(len(matches))
+            if len(matches) == 1:
+                out['suggested_' + name + '_image'] = matches[0]
+            elif not matches:
+                out['suggested_' + name + '_image'] = 'LOCAL_PINNED_IMAGE_MISSING'
+    except VPNError:
+        out['image_list'] = 'UNAVAILABLE'
+    return out
 
 
 def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cloudflared_image=None):
@@ -450,6 +508,8 @@ def main():
     probe.add_argument('--vpn-image', required=True)
     probe.add_argument('--app-image')
     probe.add_argument('--cloudflared-image')
+    hint = sub.add_parser('hints')
+    hint.help = 'List safe local image hints; never prints secrets or profile contents'
     launch = sub.add_parser('start')
     launch.add_argument('directory')
     args = parser.parse_args()
@@ -464,11 +524,20 @@ def main():
         elif args.action == 'preflight':
             status = preflight(args.vpn_image, args.app_image, args.cloudflared_image)
             print('VPN_PREFLIGHT=' + ';'.join(f'{key}={value}' for key, value in sorted(status.items())))
+        elif args.action == 'hints':
+            data = hints()
+            print('VPN_HINTS=' + ';'.join(f'{key}={value}' for key, value in sorted(data.items())))
         else:
             print('VPN_RUNTIME=' + start(args.directory))
-    except (VPNError, OSError, ValueError, KeyError, TypeError):
-        # Never stringify parser, file or subprocess exceptions containing keys.
-        print('VPN_OPERATION=FAIL;DETAILS=WITHHELD', file=sys.stderr)
+    except VPNError as exc:
+        print('VPN_ERROR=' + str(exc), file=sys.stderr)
+        if exc.diagnostic and re.fullmatch(r'[A-Z0-9_ \t\r\n:./-]{0,512}', exc.diagnostic):
+            print('VPN_DIAGNOSTIC=' + exc.diagnostic[:512], file=sys.stderr)
+        print('VPN_OPERATION=FAIL', file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError, TypeError):
+        print('VPN_ERROR=INTERNAL', file=sys.stderr)
+        print('VPN_OPERATION=FAIL', file=sys.stderr)
         return 1
     return 0
 

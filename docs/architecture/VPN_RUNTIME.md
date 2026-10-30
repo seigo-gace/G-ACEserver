@@ -27,6 +27,7 @@ VPN/app restartは現段階`no`。gatewayの再作成・JP/KR切替ではappも�
 ```text
 python3 -B scripts/gserver_vpn.py verify jp /private/Windscribe-Tokyo-Shinkansen-WG.conf
 python3 -B scripts/gserver_vpn.py verify kr /private/Windscribe-Seoul-Hangang-WG.conf
+python3 -B scripts/gserver_vpn.py hints
 python3 -B scripts/gserver_vpn.py preflight --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --cloudflared-image PINNED_CLOUDFLARED_IMAGE
 python3 -B scripts/gserver_vpn.py render jp /private/Windscribe-Tokyo-Shinkansen-WG.conf --endpoint-ip VERIFIED_PUBLIC_IPV4 --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --cloudflared-image PINNED_CLOUDFLARED_IMAGE --output NEW_PRIVATE_DIRECTORY
 python3 -B scripts/gserver_vpn.py start PRIVATE_BUNDLE_DIRECTORY
