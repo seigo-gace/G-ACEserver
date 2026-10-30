@@ -52,7 +52,7 @@
 | Bot Token/Cloudflare Token/鍵漏洩 | Vault/ローカルSecret権限、zone別Token最小化、アクセスログの秘匿 | 該当Credentialの失効・再発行、アクセス範囲隔離、影響確認、秘密の入替え、監査イベントを秘密なしで記録 |
 | 悪意ある外部URL・SSRF・DNS rebinding | 宛先契約、URL scheme/hostname/IP解決の二重検査、redirect先の再検査、local/metadata宛拒否、外向き宛先最小化 | 外向き遮断、該当ジョブ隔離、悪性ファイル・リダイレクト記録の安全な分析。VPN出口経由でも内部資源へアクセスできてはならない |
 | 危険な画像/動画・Zip爆弾・容量攻撃 | サイズ/時間/stream上限、非root隔離、保存先制約、MIME/実形式検証、bounded Queue | 処理中止、隔離・削除は安全な既存手順、他Bot/共有Volumeを保護。メディアを無条件に二重暗号化・全量コピーしない |
-| コンテナ侵害・横移動/情報持出し | cap drop、非root、no-new-privileges、書込み領域最小、ACL、Docker socket非公開、Egress宛先制御 | 対象Serviceだけ隔離、Secret無効化、改ざん/ログ確認、既知良品のimmutable image復元。**VPNは攻撃者の外向き持出しを防ぐ仕組みではない** |
+| コンテナ侵害・横移動/情報持出し | cap drop、非root、no-new-privileges、書込み領域最小、ACL、Docker socket非公開、Egress宛先制御。**正規Telegram API宛の不正送信**はネットワーク宛先許可だけでは防げないため、Bot所有側の承認された送信先/chat・機能権限・送信回数上限・内容検証を接続契約で確認 | 対象Serviceだけ隔離、Secret無効化、改ざん/ログ確認、既知良品のimmutable image復元。**VPNは攻撃者の外向き持出しを防ぐ仕組みではない** |
 | Volume/DB/バックアップ破損・暗号化攻撃 | 保存時暗号化、改ざん検知、最小権限、永続Volume保護、復旧用コピーの隔離 | Queue・Current・データ整合確認、暗号化Backupの隔離復元、必要な資格情報の交換。既存F/G原本を消さない |
 | サプライチェーン更新・設定事故 | 既存immutable image/pinned dependencies、差分・CI・制限権限・rollback | 変更停止、直前revision/構成へ安全にrollback、Source/Runtime/Evidenceを照合 |
 | Vault/Cloudflare/Windscribe同時障害 | 機能を単一新依存に不必要に集約しない。Provider/Secretのfallbackで保護を外さない | 発生した経路だけ停止/キュー保持。Cloudflare/Gateway側は正式Ownerへ通知、他Projectを独断で再起動しない |
