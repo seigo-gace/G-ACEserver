@@ -1,3 +1,13 @@
+# 2026-10-31 Cursor Composer｜VPN根本監査・Kill Switch修復
+
+- **確定不具合:** live smoke の Kill Switch 段階が `KILL_SWITCH_LEAK` を broad `except` で捕捉し **漏洩を PASS 化**していた → `assert_vpn_stop_blocks_publicip()` に分離・回帰テスト追加。
+- **確認済み:** JP 単独 preflight は `validate_live_preflight()` で選択地域のみ（KR 未設定可）。診断は `LIVE_FAILURE_CODE` + `LIVE_COMMAND_ERROR`（Gluetun ERROR 行優先）。
+- **Gluetun v3.41:** `WIREGUARD_ENDPOINT_*`, `DNS_SERVER=on`, `FIREWALL_OUTBOUND_SUBNETS=<pin>/32`（HEAD `ea0459a` 以降）。
+- **境界:** kernel guard smoke / Source unittest / live VPN は別ラベル（`ACCEPTANCE_*`）。Cloudflare Access E2E は未検証のまま。
+- **Master 1ブロック:** `bash scripts/verify_vpn_live_host.sh`
+
+---
+
 # 2026-10-31 Cursor Composer｜VPN/Cloudflare live smoke（Source）
 
 - **実装:** `smoke_gserver_vpn_live.py`（実WireGuard egress・DNS/IPv6拒否・kill switch・任意cloudflared）、`gserver_vpn.py set-endpoint-pin` / `pull-reference-images --confirm-registry-pull` / render時のendpoint-cache利用、`gserver_connection_readiness.py --local-status`。

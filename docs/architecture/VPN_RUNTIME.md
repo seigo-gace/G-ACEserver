@@ -80,3 +80,7 @@ python3 -B scripts/smoke_gserver_vpn_live.py
 ```
 
 `PERFORMANCE`・Access認証・Webhook E2E・Telegram Bot本体は別Gate。namespace guard kernel smoke PASSをlive smoke PASSと混同しない。
+
+**Master 1コマンド:** `bash scripts/verify_vpn_live_host.sh`（事前に `set-endpoint-pin` と digest 固定 image。KR pin は KR 実行時のみ必須）。
+
+**Kill Switch 試験:** VPN service `stop` 後に public IP API へ到達**成功**した場合のみ `KILL_SWITCH_LEAK` で FAIL。接続失敗のみ PASS（`assert_vpn_stop_blocks_publicip`）。`KILL_SWITCH_LEAK` を broad `except` で握りつぶさない。

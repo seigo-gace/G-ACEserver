@@ -86,6 +86,19 @@ def validate_live_preflight(status, region, *, require_cloudflared=False):
         raise vpn.VPNError('LOCAL_PINNED_IMAGE_MISSING')
 
 
+def assert_vpn_stop_blocks_publicip(app_id):
+    """Fail closed: any successful public IP read after VPN stop is a kill-switch leak."""
+    try:
+        body_sha256(app_id, 'http://127.0.0.1:8000/v1/publicip/ip', timeout=5)
+    except apps.AppError:
+        return
+    except vpn.VPNError as exc:
+        if str(exc) == 'KILL_SWITCH_LEAK':
+            raise
+        return
+    raise vpn.VPNError('KILL_SWITCH_LEAK')
+
+
 def live_failure_detail(exc):
     """Map structured errors to stable codes; sanitize only unstructured runtime text."""
     if isinstance(exc, (vpn.VPNError, apps.AppError)):
@@ -170,11 +183,8 @@ def main():
             docker('compose', '--project-name', project, '--project-directory', str(bundle),
                    '--env-file', '/dev/null', '-f', str(bundle / 'compose.json'),
                    'stop', '--timeout', '10', 'vpn')
-            try:
-                body_sha256(app_id, 'http://127.0.0.1:8000/v1/publicip/ip', timeout=5)
-                raise vpn.VPNError('KILL_SWITCH_LEAK')
-            except (apps.AppError, vpn.VPNError):
-                print('VPN_KILL_SWITCH=PASS', flush=True)
+            assert_vpn_stop_blocks_publicip(app_id)
+            print('VPN_KILL_SWITCH=PASS', flush=True)
             phase = 'CLOUDFLARE'
             if use_tunnel:
                 ids = docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + project,
@@ -211,6 +221,9 @@ def main():
                     print('CORE_STORAGE_OTHER_CONTAINERS_UNCHANGED=PASS', flush=True)
                 except (apps.AppError, vpn.VPNError, ValueError, KeyError):
                     failure = failure or 'EXISTING_CONTAINER_READBACK'
+    print('ACCEPTANCE_KERNEL_GUARD=NOT_THIS_SCRIPT')
+    print('ACCEPTANCE_LIVE_VPN=' + ('FAIL' if failure else 'PASS'))
+    print('ACCEPTANCE_CLOUDFLARE=' + ('NOT_RUN' if failure else 'PARTIAL_OR_SKIPPED'))
     print('VERIFY=' + ('FAIL' if failure else 'PASS'))
     print('ERROR=' + ('LIVE_' + failure if failure else 'NONE'))
     print('EXIT_CODE=' + ('1' if failure else '0'))

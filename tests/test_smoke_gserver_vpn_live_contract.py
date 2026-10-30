@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -71,6 +72,24 @@ class LivePreflightRegion(unittest.TestCase):
         with self.assertRaises(vpn.VPNError) as error:
             live.validate_live_preflight(status, 'kr')
         self.assertEqual(str(error.exception), 'ENDPOINT_PUBLIC_IPV4_PIN_REQUIRED')
+
+
+class KillSwitchLogic(unittest.TestCase):
+    def test_leak_raises_kill_switch_error(self):
+        with mock.patch.object(live, 'body_sha256', return_value='a' * 64):
+            with self.assertRaises(vpn.VPNError) as error:
+                live.assert_vpn_stop_blocks_publicip('probe')
+            self.assertEqual(str(error.exception), 'KILL_SWITCH_LEAK')
+
+    def test_connection_failure_is_pass(self):
+        with mock.patch.object(live, 'body_sha256', side_effect=live.apps.AppError('CONNECT_FAILED')):
+            live.assert_vpn_stop_blocks_publicip('probe')
+
+    def test_source_does_not_swallow_leak_in_broad_except(self):
+        body = SCRIPT.read_text()
+        block = body[body.find("phase = 'KILL_SWITCH'"):body.find("phase = 'CLOUDFLARE'")]
+        self.assertIn('assert_vpn_stop_blocks_publicip', block)
+        self.assertNotIn('except (apps.AppError, vpn.VPNError)', block)
 
 
 class LiveFailureDetail(unittest.TestCase):
