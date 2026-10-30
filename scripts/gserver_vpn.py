@@ -374,10 +374,11 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
     directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     name = 'gace-vpn-' + secrets.token_hex(8)
     log = {'driver': 'local', 'options': {'max-size': '1m', 'max-file': '2'}}
-    shared = {'restart': 'no', 'read_only': True, 'cap_drop': ['ALL'],
-              'security_opt': ['no-new-privileges:true'], 'pids_limit': 96,
-              'mem_limit': '256m', 'cpus': '1.0', 'logging': log}
+    shared = {'restart': 'no', 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
+              'pids_limit': 96, 'mem_limit': '256m', 'cpus': '1.0', 'logging': log}
+    read_only_sidecar = {**shared, 'read_only': True}
     config = {'name': name, 'services': {
+        # Gluetun v3.41 creates an internal user at start (/etc/passwd); root FS cannot be read-only.
         'vpn': {**shared, 'image': vpn_image, 'pull_policy': 'never', 'user': '0:0',
             'cap_add': ['NET_ADMIN'], 'devices': ['/dev/net/tun:/dev/net/tun'],
             'sysctls': {'net.ipv6.conf.all.disable_ipv6': '1', 'net.ipv6.conf.default.disable_ipv6': '1'},
@@ -395,13 +396,13 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
             'healthcheck': {'test': ['CMD', '/bin/sh', '-ec',
                 '[ -f /run/gserver-guard/ready ] || exit 0; exec /gluetun-entrypoint healthcheck'],
                             'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '30s'}},
-        'app': {**shared, 'image': app_image, 'pull_policy': 'never', 'user': '65534:65534',
+        'app': {**read_only_sidecar, 'image': app_image, 'pull_policy': 'never', 'user': '65534:65534',
             'network_mode': 'service:vpn', 'depends_on': {'vpn': {'condition': 'service_healthy'}},
             'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700']}},
         'configs': {'vpn_dns': {'content': 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'}}}
     if cloudflared_image:
-        config['services']['cloudflared'] = {**shared, 'image': cloudflared_image, 'pull_policy': 'never',
+        config['services']['cloudflared'] = {**read_only_sidecar, 'image': cloudflared_image, 'pull_policy': 'never',
             'user': '65534:65534', 'network_mode': 'service:vpn',
             'depends_on': {'vpn': {'condition': 'service_healthy'}},
             'entrypoint': ['/bin/sh', '-ec', CLOUDFLARED_WAIT],

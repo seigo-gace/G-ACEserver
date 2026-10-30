@@ -84,3 +84,5 @@ python3 -B scripts/smoke_gserver_vpn_live.py
 **Master 1コマンド:** `bash scripts/verify_vpn_live_host.sh`（事前に `set-endpoint-pin` と digest 固定 image。KR pin は KR 実行時のみ必須）。
 
 **Kill Switch 試験:** VPN service `stop` 後に public IP API へ到達**成功**した場合のみ `KILL_SWITCH_LEAK` で FAIL。接続失敗のみ PASS（`assert_vpn_stop_blocks_publicip`）。`KILL_SWITCH_LEAK` を broad `except` で握りつぶさない。
+
+**read_only 責務:** Gluetun v3.41.3 は起動時に内部ユーザ作成で `/etc/passwd` へ書くため **vpn サービスだけ read_only 不可**。app/cloudflared は read_only のまま。書込みは tmpfs（`/tmp`, `/gluetun`, guard marker）と Gluetun 既定パスに限定され、nft guard・NET_ADMIN・非root app は維持。

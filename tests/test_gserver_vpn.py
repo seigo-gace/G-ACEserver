@@ -127,6 +127,12 @@ class VPNTests(unittest.TestCase):
         self.assertNotIn('eyJ', blob)
         self.assertIn('/run/gserver-tunnel/credential', blob)
 
+    def test_gluetun_vpn_not_read_only_app_sidecars_are(self):
+        out, _ = self.bundle()
+        config = json.loads((out / 'compose.json').read_text())
+        self.assertNotIn('read_only', config['services']['vpn'])
+        self.assertTrue(config['services']['app']['read_only'])
+
     def test_apps_cannot_change_namespace_and_have_no_direct_network(self):
         out, _ = self.bundle()
         config = json.loads((out/'compose.json').read_text())
