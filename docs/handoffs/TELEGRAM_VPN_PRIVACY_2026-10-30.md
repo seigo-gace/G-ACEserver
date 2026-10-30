@@ -170,3 +170,11 @@ NET_ADMIN以外をdropしたrootコンテナは、Host user所有0600ファイ�
 汎用2app共存/停止再起動/永続化/設定復帰/Core不変はMaster実機でPASS（2026-10-31）。同一bridge private peer canaryによる namespace nft guard kernel smoke も Master実機 VERIFY=PASS（2026-10-31）。試験は宛先を同一Compose bridge上のprivate peer canary（RFC1918、WAN/publicなし）とし、Host bridge gateway bindはWSL/Docker差で使わない。guard適用前のpeer到達、適用後のloopback到達/peer遮断、drop counter増加を確認する。専用netnsだけを操作し、Host全体のFirewallは変更しない。これはnamespace guardのkernel実証であって、WireGuard断/JP-KR/DNS/IPv6/Cloudflare/速度の全受入ではない。次Gateはendpoint pin・digest監査済みGluetun・隔離bundle起動による実WireGuard接続試験。
 
 通常userはroot-owned container PIDの`/proc/PID/ns/net`を読めない場合がある。namespaceのopen・Host namespaceとのinode比較・nft適用・readbackは同じ既存sudo権限の短命helper内で行い、開いたFDをnsenterへ渡して対象を固定する。controllerが非rootのままroot PIDのnamespaceをstatできるという仮定を除去する。guard適用後はDocker PIDとhelperのnamespace inodeを再照合してから鍵/起動markerを解放する。sudo権限を全user/常駐処理へ拡大せず、他project/Host namespaceへの操作は拒否する。
+
+### R15 / Codex再開時監査：実通信と遮断の証拠を分離（2026-10-31）
+
+`ed111a3` のDNS権限修正を維持する。既存live smokeのGluetun loopback public-IP APIは内部API到達の証拠に限る。応答キャッシュをアプリの実HTTPS/WireGuard通信の証拠にせず、VPN停止による内部API消失をKill Switch合格にしない。アプリUID65534からproxy無効・TLS検証付きの固定public IPv4 HTTPSと名前付きHTTPSを実行し、出口public IPv4・地域を検証する。WireGuardは秘密を含むdumpではなくlatest-handshakes/transferのみを非表示で読み、直近handshakeと試験前後の送受信増加を照合する。
+
+Kill Switchは停止前に成功したpublic IPv4 TCP宛先に対して、VPN停止後も生存する同じappから再試験する。Docker exec失敗・app停止・JSON欠落・未知の結果はFAIL。停止後のapp namespaceが同じで独立guardが不変であることも確認する。DNSはUDP/TCPのDocker組込resolver宛送信と各専用drop counter増加を確認する。IPv6は閉じたloopback portを証拠にせず、namespaceのdisable_ipv6とpublic IPv6宛遮断を確認する。これらもDNS全経路・Proxy/SSRF・実媒体・復旧/速度の総合受入とは別Gate。
+
+任意cloudflaredを有効にすると本番Tunnelへ試験replicaが参加し得るため、このJP/KR出口受入ではcredential指定を拒否する。Cloudflareの実認証・経路・所有zone・隔離Tunnel契約確認後に別Gateで統合する。既存Tunnel/Access/資格情報には変更を加えない。
