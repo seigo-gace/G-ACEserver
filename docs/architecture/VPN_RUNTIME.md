@@ -27,8 +27,10 @@ VPN/app restartは現段階`no`。gatewayの再作成・JP/KR切替ではappも�
 ```text
 python3 -B scripts/gserver_vpn.py verify jp /private/Windscribe-Tokyo-Shinkansen-WG.conf
 python3 -B scripts/gserver_vpn.py verify kr /private/Windscribe-Seoul-Hangang-WG.conf
-python3 -B scripts/gserver_vpn.py render jp /private/Windscribe-Tokyo-Shinkansen-WG.conf --endpoint-ip VERIFIED_PUBLIC_IPV4 --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --output NEW_PRIVATE_DIRECTORY
+python3 -B scripts/gserver_vpn.py preflight --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --cloudflared-image PINNED_CLOUDFLARED_IMAGE
+python3 -B scripts/gserver_vpn.py render jp /private/Windscribe-Tokyo-Shinkansen-WG.conf --endpoint-ip VERIFIED_PUBLIC_IPV4 --vpn-image PINNED_GLUETUN_IMAGE --app-image PINNED_APP_IMAGE --cloudflared-image PINNED_CLOUDFLARED_IMAGE --output NEW_PRIVATE_DIRECTORY
 python3 -B scripts/gserver_vpn.py start PRIVATE_BUNDLE_DIRECTORY
+python3 -B scripts/gserver_connection_readiness.py --bundle PRIVATE_BUNDLE_DIRECTORY
 ```
 
 上記は引数契約の説明であり、placeholderのまま実行する手順ではない。通常userから起動し、必要なDocker/nsenterだけ既存sudo権限を使う。生成親directoryは既存のowner-onlyローカルstateを選ぶ。real image digest/endpoint pin/実app契約がない状態で適当な値を埋めて稼働させない。
@@ -36,7 +38,7 @@ python3 -B scripts/gserver_vpn.py start PRIVATE_BUNDLE_DIRECTORY
 ## 未実装・未受入を明確にする
 
 - controller/Compose解析/単体試験は**実WireGuard接続・kernel漏洩防止の証明ではない**。NET_ADMIN、nftables kernel適用、Gluetun digest/起動権限、MTU、DNS、IPv6、kill/recreate時の漏洩を隔離実機で試験する。
-- この初期rendererはVPN+appの足場。cloudflared service/Cloudflare account・Tunnel・Access・DNS・WAF・Webhookの実接続はまだ組み込んでいない。**Cloudflareに対するIP秘匿を達成したとしない。** connectorも同じguard付き保護グループに組み込んでからINGRESS/IPを実証する。
+- `render --cloudflared-image` で **cloudflared を `network_mode: service:vpn` として同じguard付きnamespaceへ追加**できる。Tunnel tokenはCompose/envに入れず、bundle内の0600 `cloudflared.credential` を `start` 時にcontainer tmpfsへstdin供給する。Cloudflare zone/Tunnel/Access/WAF/Webhookの**実変更・実接続は行わない**。**Cloudflare IP秘匿の達成とはしない。**
 - appの設定/Secret/永続データ/healthcheck/正当な宛先はapp Owner契約から追加する。新Botを生成したり既存BotのSourceを書き換えたりしない。
 - guardは出口経路の防御。Telegram API宛の不正持出し、webhook replay、SSRF、媒体処理制約はapp契約と攻撃試験も必要。namespace内IPv4を許すことを全攻撃防止と呼ばない。
 - endpoint pinは現在の有効性/出所を記録し、更新時は新しいbundleを生成して再試験する。endpoint名の自動DNS解決、JP/KR自動切替は未実装。

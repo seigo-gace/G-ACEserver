@@ -16,6 +16,7 @@ spec.loader.exec_module(vpn)
 KEY = base64.b64encode(b'a'*32).decode()
 VPN_IMAGE = 'qmcgaw/gluetun@sha256:' + '1'*64
 APP_IMAGE = 'sha256:' + '2'*64
+TUNNEL_IMAGE = 'cloudflare/cloudflared@sha256:' + '3'*64
 PROFILE = f'''[Interface]
 PrivateKey = {KEY}
 Address = 10.10.0.2/32
@@ -112,6 +113,17 @@ class VPNTests(unittest.TestCase):
                 self.assertNotIn(KEY, p.read_text())
             self.assertEqual(p.stat().st_mode & 0o077, 0)
         self.assertEqual(set(manifest['acceptance'].values()), {'NOT_VERIFIED'})
+
+    def test_cloudflared_shares_vpn_without_compose_secrets(self):
+        out = self.root / 'tunnel-bundle'
+        vpn.render(out, 'jp', self.path, VPN_IMAGE, APP_IMAGE, cloudflared_image=TUNNEL_IMAGE)
+        config = json.loads((out / 'compose.json').read_text())
+        tunnel = config['services']['cloudflared']
+        self.assertEqual(tunnel['network_mode'], 'service:vpn')
+        self.assertNotIn('environment', tunnel)
+        blob = json.dumps(config)
+        self.assertNotIn('eyJ', blob)
+        self.assertIn('/run/gserver-tunnel/credential', blob)
 
     def test_apps_cannot_change_namespace_and_have_no_direct_network(self):
         out, _ = self.bundle()
@@ -231,6 +243,20 @@ class VPNTests(unittest.TestCase):
         self.assertEqual(vpn.policy_fingerprint(a),vpn.policy_fingerprint(b))
         b['nft']['nftables'][0]['rule']['expr'][-1]={'accept':None}
         self.assertNotEqual(vpn.policy_fingerprint(a),vpn.policy_fingerprint(b))
+
+    def test_endpoint_cache_validation_without_printing_pins(self):
+        cache = self.root / 'endpoint-cache.json'
+        cache.write_text('{"jp": "93.184.216.34", "kr": "93.184.216.35"}')
+        cache.chmod(0o600)
+        with mock.patch.object(vpn, 'ENDPOINT_CACHE', cache):
+            pins = vpn.endpoint_pins()
+        self.assertEqual(set(pins), {'jp', 'kr'})
+
+    def test_preflight_reports_missing_local_image(self):
+        with mock.patch.object(vpn, 'run', side_effect=vpn.VPNError('LOCAL_COMMAND_FAILED')):
+            with self.assertRaises(vpn.VPNError) as error:
+                vpn.inspect_local_image(VPN_IMAGE, [])
+        self.assertEqual(str(error.exception), 'LOCAL_PINNED_IMAGE_MISSING')
 
     def test_existing_network_is_refused_without_container_or_image_changes(self):
         out, manifest = self.bundle()

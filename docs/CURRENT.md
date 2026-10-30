@@ -5,7 +5,8 @@
 - **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **238 tests PASS**（VPN helper/guard smoke offline含む）。CI未実行。
 - **Runtime（Master端末 2026-10-31）:** recovery readback PASS。**2app generic smoke VERIFY=PASS**（`PROBE_PRIVATE_SUCCESS=SAVED`）。**namespace guard kernel smoke VERIFY=PASS**（peer canary baseline、loopback許可、guard後peer遮断、drop counter増加、Core/Storage/他container不変）。WireGuard/WAN/Cloudflareは未試験どおり。R14のkernel実証Gateは**この範囲で受入済み**（JP/KR接続・漏洩・速度・cloudflared統合は未受入）。
 - **C/D:** FINAL_ACCEPTANCEどおりC=Windows最小・D HDD上WSL ext4をLinux実行元。recovery baselineでD側git status中央値≈3.5ms、G旧copy≈221ms（read-only receipt）。無断WSL移設・Cursor User Data移動・Docker prune/build/pull禁止を維持。
-- **Exact Next:** D側未コミット差分をPR #15へ整理（commit/pushはMaster指示時）。続きは設計v3のVPN接続前Gate—endpoint pin・digest監査済みlocal Gluetun image・private bundle `render`/`start` の**隔離接続試験**（Core再配備・pull/buildなし方針維持）。並行タスク: F01 Windows→WSL自動起動実測、F03残Gate、F04/F05/F08。F01〜F08全体未完了。
+- **Git（2026-10-31）:** ローカル `4b3ebed`（R14+kernel smoke+文書）までcommit済み。**PushはWSL側GitHub HTTPS認証未設定のためComposerから未完了**（`ahead 2+`）。Master端末で `git push origin chat/gserver-generic-app-runtime-20261030` を実行すればPR #15更新。続くcommitで cloudflared統合・preflight・接続準備レポートを追加予定。
+- **Exact Next:** `gserver_vpn.py preflight` でlocal pinned image有無のみ確認（pull/buildなし）。bundle `render`（cloudflared optional）→ `gserver_connection_readiness.py` で slot 確認→実鍵/Token投入は `WAIT_REAL_CONNECTION`。F01/F03/F04/F05/F08は独立可能範囲を継続。F01〜F08全体未完了。
 
 ---
 

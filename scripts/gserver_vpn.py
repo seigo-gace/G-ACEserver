@@ -24,6 +24,11 @@ IMAGE = re.compile(r'(?:sha256:[a-f0-9]{64}|[a-zA-Z0-9./_-]+@sha256:[a-f0-9]{64}
 PROJECT = re.compile(r'gace-vpn-[a-f0-9]{16}\Z')
 SOCKET = 'unix:///var/run/docker.sock'
 GUARD = 'gserver_privacy'
+ENDPOINT_CACHE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gserver/vpn-profiles/endpoint-cache.json'
+TUNNEL_CREDENTIAL = 'cloudflared.credential'
+CLOUDFLARED_WAIT = ('while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; '
+                    'while [ ! -f /run/gserver-tunnel/credential ]; do sleep 3600; done; '
+                    'exec cloudflared tunnel --no-autoupdate run --token "$(cat /run/gserver-tunnel/credential)"')
 
 
 # Executed only through the caller's existing sudo authority. Opening the netns
@@ -161,7 +166,60 @@ def pinned(image):
     return image
 
 
-def render(directory, region, source, vpn_image, app_image, endpoint_ip=None):
+def endpoint_pins():
+    """Read owner-maintained IPv4 pins; never print addresses or write to Git."""
+    if not ENDPOINT_CACHE.is_file():
+        return {}
+    _, data = private_read(ENDPOINT_CACHE)
+    try:
+        cache = json.loads(data)
+        if not isinstance(cache, dict):
+            raise ValueError()
+        pins = {}
+        for region in REGIONS:
+            if region not in cache:
+                continue
+            value = cache[region]
+            if not isinstance(value, str):
+                raise ValueError()
+            address = ipaddress.ip_address(value)
+            if address.version != 4 or not address.is_global:
+                raise ValueError()
+            pins[region] = str(address)
+        return pins
+    except (ValueError, TypeError) as exc:
+        raise VPNError('ENDPOINT_CACHE_INVALID') from exc
+
+
+def inspect_local_image(image, privilege):
+    pinned(image)
+    try:
+        run(privilege + ['docker', '--host', SOCKET, 'image', 'inspect', image])
+    except VPNError as exc:
+        raise VPNError('LOCAL_PINNED_IMAGE_MISSING') from exc
+    return 'LOCAL_PINNED_IMAGE_PRESENT'
+
+
+def preflight(vpn_image, app_image=None, cloudflared_image=None):
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
+    status = {'vpn': inspect_local_image(vpn_image, privilege)}
+    if app_image:
+        status['app'] = inspect_local_image(app_image, privilege)
+    if cloudflared_image:
+        status['cloudflared'] = inspect_local_image(cloudflared_image, privilege)
+    for region in REGIONS:
+        status['endpoint_pin_' + region] = 'NOT_CONFIGURED'
+    try:
+        pins = endpoint_pins()
+        status['endpoint_cache'] = 'OK'
+        for region in pins:
+            status['endpoint_pin_' + region] = 'CONFIGURED'
+    except VPNError:
+        status['endpoint_cache'] = 'INVALID'
+    return status
+
+
+def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cloudflared_image=None):
     p = profile(source, region)
     try:
         selected = ipaddress.ip_address(endpoint_ip or p['endpoint'])
@@ -185,6 +243,8 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None):
     runtime.write(stream)
     pinned(vpn_image)
     pinned(app_image)
+    if cloudflared_image:
+        pinned(cloudflared_image)
     directory = Path(directory).expanduser().absolute()
     if directory.resolve() != directory:
         raise VPNError('BUNDLE_SYMLINK')
@@ -212,11 +272,19 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None):
             'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
             'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700']}},
         'configs': {'vpn_dns': {'content': 'nameserver 127.0.0.1\noptions timeout:2 attempts:2\n'}}}
+    if cloudflared_image:
+        config['services']['cloudflared'] = {**shared, 'image': cloudflared_image, 'pull_policy': 'never',
+            'user': '65534:65534', 'network_mode': 'service:vpn',
+            'depends_on': {'vpn': {'condition': 'service_healthy'}},
+            'entrypoint': ['/bin/sh', '-ec', CLOUDFLARED_WAIT],
+            'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700',
+                      '/run/gserver-tunnel:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65534,gid=65534']}
     contents = {'compose.json': json.dumps(config, indent=2) + '\n',
                 'guard.nft': guard_rules(str(selected), p['port']),
                 'wireguard.conf': stream.getvalue()}
     manifest = {'schema': 'gserver.vpn-bundle.v1', 'project': name,
                 'profile': {'path': p['path'], 'region': region, 'sha256': p['sha256']},
+                'components': sorted(config['services']),
                 'hashes': {key: hashlib.sha256(value.encode()).hexdigest() for key, value in contents.items()},
                 'acceptance': {key: 'NOT_VERIFIED' for key in ('IP', 'NET', 'INGRESS', 'CRYPTO', 'RESPONSE', 'PERFORMANCE', 'OPS')}}
     contents['manifest.json'] = json.dumps(manifest, indent=2) + '\n'
@@ -338,7 +406,21 @@ def start(directory):
         current = namespace_guard(pid)
         if current['inode'] != initial['inode'] or policy_fingerprint(current) != policy_fingerprint(initial):
             raise VPNError('VPN_GUARD_CHANGED_DURING_BOOTSTRAP')
-        run(compose + ready + ['app'])
+        if 'cloudflared' in config['services']:
+            credential = directory / TUNNEL_CREDENTIAL
+            if not credential.is_file():
+                raise VPNError('CLOUDFLARED_CREDENTIAL_MISSING')
+            run(compose + ['up', '-d', '--no-build', '--pull', 'never', 'cloudflared'])
+            tunnel_ids = run(compose + ['ps', '-q', 'cloudflared']).split()
+            if len(tunnel_ids) != 1:
+                raise VPNError('CLOUDFLARED_CONTAINER_MISSING')
+            _, token = private_read(credential, limit=8192)
+            if not token.strip():
+                raise VPNError('CLOUDFLARED_CREDENTIAL_EMPTY')
+            run(docker + ['exec', '-i', tunnel_ids[0], '/bin/sh', '-ec',
+                           'umask 077; cat > /run/gserver-tunnel/credential'], input=token.decode('ascii'))
+        if 'app' in config['services']:
+            run(compose + ready + ['app'])
     except BaseException:
         if created:
             try:
@@ -363,6 +445,11 @@ def main():
     create.add_argument('--app-image', required=True)
     create.add_argument('--output', required=True)
     create.add_argument('--endpoint-ip', help='Explicit verified public IPv4 pin; no automatic DNS bootstrap')
+    create.add_argument('--cloudflared-image', help='Pinned local cloudflared image; tunnel token stays out of Compose')
+    probe = sub.add_parser('preflight')
+    probe.add_argument('--vpn-image', required=True)
+    probe.add_argument('--app-image')
+    probe.add_argument('--cloudflared-image')
     launch = sub.add_parser('start')
     launch.add_argument('directory')
     args = parser.parse_args()
@@ -371,8 +458,12 @@ def main():
             profile(args.profile, args.region)
             print('VPN_PROFILE_STRUCTURE=PASS;CONNECTION=NOT_VERIFIED')
         elif args.action == 'render':
-            render(args.output, args.region, args.profile, args.vpn_image, args.app_image, args.endpoint_ip)
+            render(args.output, args.region, args.profile, args.vpn_image, args.app_image,
+                   args.endpoint_ip, args.cloudflared_image)
             print('VPN_BUNDLE=CREATED_PRIVATE;RUNTIME=NOT_VERIFIED')
+        elif args.action == 'preflight':
+            status = preflight(args.vpn_image, args.app_image, args.cloudflared_image)
+            print('VPN_PREFLIGHT=' + ';'.join(f'{key}={value}' for key, value in sorted(status.items())))
         else:
             print('VPN_RUNTIME=' + start(args.directory))
     except (VPNError, OSError, ValueError, KeyError, TypeError):
