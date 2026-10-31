@@ -1,5 +1,6 @@
 """Gserver Bot -> durable spool -> existing Gateway TGserver ZERO lane."""
 import json
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -13,7 +14,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID, MAX_ATTEMPTS,
                         _NoGatewayRedirect, gateway_endpoint, envelope, flush_once,
-                        send_gateway, validate)
+                        send_gateway, gateway_token, validate)
 
 
 def sample():
@@ -27,6 +28,16 @@ class TgsBridgeTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.folder = Path(tmp.name)
         self.queue = BotSpool(self.folder / "queue")
+
+    def test_existing_public_spool_directory_is_refused(self):
+        public = self.folder / "public-queue"
+        public.mkdir()
+        public.chmod(0o755)
+        with self.assertRaisesRegex(BotEventError, "SPOOL_DIRECTORY_UNSAFE"):
+            BotSpool(public)
+        self.assertFalse((public / "bot-events.sqlite3").exists())
+        public.chmod(0o700)
+        self.assertEqual(BotSpool(public).counts()["pending"], 0)
 
     def test_only_bounded_operational_fields_accepted(self):
         for payload in (
@@ -114,6 +125,19 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.counts()["blocked"], 0)
         sent = flush_once(self.queue, "https://gateway.example", "token", sender=lambda *_: "ack")
         self.assertEqual(sent["sent"], 1)
+
+    def test_gateway_token_requires_private_regular_file(self):
+        secret = self.folder / "gateway-token"
+        secret.write_bytes(b"T" * 32)
+        secret.chmod(0o644)
+        with self.assertRaisesRegex(BotEventError, "GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE"):
+            gateway_token(secret)
+        secret.chmod(0o600)
+        self.assertEqual(gateway_token(secret), "T" * 32)
+        link = self.folder / "gateway-token-link"
+        link.symlink_to(secret)
+        with self.assertRaisesRegex(BotEventError, "GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE"):
+            gateway_token(link)
 
     def test_wrong_gateway_url_rejected(self):
         for url in ("http://gateway.example", "https://user:pass@gateway.example",
@@ -350,6 +374,59 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.counts()["blocked"], 1)
         self.assertEqual(self.queue.retry_blocked(), 1)
         self.assertEqual(self.queue.counts()["pending"], 1)
+
+    def test_stale_ack_does_not_override_newer_retry_lease(self):
+        self.queue.accept(sample(), now=100)
+        first = self.queue.claim(now=100)
+        second = self.queue.claim(now=161)
+        self.assertEqual(second[2], first[2] + 1)
+        self.assertFalse(self.queue.finish(first[0], "ack", first[2], first[3], now=162))
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.assertEqual(self.queue.counts()["sending"], 1)
+        self.assertTrue(self.queue.finish(second[0], "retry", second[2], second[3], now=162))
+        self.assertEqual(self.queue.counts()["pending"], 1)
+        self.assertEqual(self.queue.counts()["sending"], 0)
+
+    def test_old_ack_rejected_even_when_operator_retry_resets_attempt_count(self):
+        self.queue.accept(sample(), now=100)
+        old = self.queue.claim(now=100)
+        self.assertTrue(self.queue.finish(old[0], "blocked", old[2], old[3], now=101))
+        self.assertEqual(self.queue.retry_blocked(), 1)
+        newer = self.queue.claim(now=102)
+        self.assertEqual(old[2], newer[2])
+        self.assertGreater(newer[3], old[3])
+        self.assertFalse(self.queue.finish(old[0], "ack", old[2], old[3], now=103))
+        self.assertEqual(self.queue.counts()["sending"], 1)
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.assertTrue(self.queue.finish(newer[0], "ack", newer[2], newer[3], now=104))
+        self.assertEqual(self.queue.counts()["sent"], 1)
+
+    def test_legacy_spool_migrates_generation_without_losing_events(self):
+        legacy = self.folder / "legacy-queue"
+        legacy.mkdir()
+        with sqlite3.connect(legacy / "bot-events.sqlite3") as conn:
+            conn.execute("CREATE TABLE events (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, "
+                         "payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', "
+                         "attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, "
+                         "created_at INTEGER NOT NULL, sent_at INTEGER, last_status TEXT NOT NULL DEFAULT 'queued')")
+        migrated = BotSpool(legacy)
+        self.assertEqual(migrated.accept(dict(sample(), event_id="migrate-1"), now=100)["status"], "queued")
+        claimed = migrated.claim(now=100)
+        self.assertEqual(len(claimed), 4)
+        self.assertEqual(claimed[3], 1)
+        self.assertTrue(migrated.finish(claimed[0], "ack", claimed[2], claimed[3], now=101))
+        self.assertEqual(migrated.counts()["sent"], 1)
+
+    def test_stale_gateway_ack_does_not_report_false_spool_success(self):
+        self.queue.accept(sample())
+        def reclaimed_before_ack(payload, endpoint, token):
+            self.assertIsNotNone(self.queue.claim(now=int(time.time()) + 61))
+            return "ack"
+        result = flush_once(self.queue, "https://gateway.example", "dummy",
+                            limit=1, sender=reclaimed_before_ack)
+        self.assertEqual(result, {"sent": 0, "retry": 0, "blocked": 0})
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.assertEqual(self.queue.counts()["sending"], 1)
 
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
