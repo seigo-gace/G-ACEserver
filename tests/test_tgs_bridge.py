@@ -404,6 +404,7 @@ class TgsBridgeTests(unittest.TestCase):
     def test_legacy_spool_migrates_generation_without_losing_events(self):
         legacy = self.folder / "legacy-queue"
         legacy.mkdir()
+        legacy.chmod(0o700)
         with sqlite3.connect(legacy / "bot-events.sqlite3") as conn:
             conn.execute("CREATE TABLE events (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, "
                          "payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', "
