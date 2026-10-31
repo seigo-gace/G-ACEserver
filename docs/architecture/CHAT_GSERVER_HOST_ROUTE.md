@@ -44,5 +44,16 @@ Therefore **remote CHAT-to-PC commands cannot be accepted as live or ready** mer
 - CORE/PR15/COMPOSER_NON_REGRESSION: NOT_VERIFIED.
 - PROD_READY: NO.
 
+## Local PC executor (no public ingress)
+
+After owner registration (`python3 -B scripts/chat_host_registration.py install /absolute/checkout`), pipe one admitted JSON request to:
+
+```bash
+bash scripts/verify_chat_host_local.sh
+python3 -B scripts/chat_host_local_run.py < request.json
+```
+
+`chat_host_local_run.py` returns `CHAT_HOST_REQUEST_ID`, `CHAT_HOST_SOURCE_SHA`, `CHAT_HOST_OK`, and bounded Git metadata. Duplicate IDs and expired requests fail closed. Remote ChatGPT transport remains **NOT_VERIFIED** until an independently approved authenticated ingress exists; Contabo Gateway/receiver is not PC authority.
+
 ## Exact next action
-Read-only inventory in the existing owner WSL: registered processes, existing listener/broker, G-ACE-zone Tunnel/Access ownership and repo HEAD/dirty status; redact secrets. Select the smallest existing authorized route from those facts, then implement the missing local adapter and test it. Do not provision public ingress, a new token, or touch Codex PR #15 as a substitute for this gate.
+Complete read-only inventory on the owner WSL (listeners, existing broker, Cloudflare ownership) without altering DNS or shared Gateway. Wire the smallest **existing** approved transport to `chat_host_local_run.py` after C-phase local E2E passes. Do not provision public ingress or touch Codex PR #15 as a substitute for this gate.
