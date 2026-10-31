@@ -69,3 +69,18 @@ class CheckoutTests(TestCase):
         with self.assertRaises(AdmissionDenied):
             observe_owned_checkout(self.root, registered_root=self.root / "none",
                                    expected_sha=SHA, command_id="project.git_head")
+
+    def test_malformed_command_type(self):
+        with self.assertRaises(AdmissionDenied):
+            observe_owned_checkout(self.root, registered_root=self.root,
+                                   expected_sha=SHA, command_id=["project.git_head"])
+    @mock.patch("chat_host_checkout.subprocess.run")
+    def test_nonexistent_git_reported_root(self, run):
+        def invalid_root(args, **kwargs):
+            if args[-2:] == ["rev-parse", "--show-toplevel"]:
+                return CompletedProcess(args, 0, str(self.root / "missing"))
+            return self.fake(args, **kwargs)
+        run.side_effect = invalid_root
+        with self.assertRaises(AdmissionDenied):
+            observe_owned_checkout(self.root, registered_root=self.root,
+                                   expected_sha=SHA, command_id="project.git_head")
