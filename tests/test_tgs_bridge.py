@@ -356,12 +356,23 @@ class TgsBridgeTests(unittest.TestCase):
         first = self.queue.claim(now=100)
         second = self.queue.claim(now=161)
         self.assertEqual(second[2], first[2] + 1)
-        self.queue.finish(first[0], "ack", first[2], now=162)
+        self.assertFalse(self.queue.finish(first[0], "ack", first[2], now=162))
         self.assertEqual(self.queue.counts()["sent"], 0)
         self.assertEqual(self.queue.counts()["sending"], 1)
-        self.queue.finish(second[0], "retry", second[2], now=162)
+        self.assertTrue(self.queue.finish(second[0], "retry", second[2], now=162))
         self.assertEqual(self.queue.counts()["pending"], 1)
         self.assertEqual(self.queue.counts()["sending"], 0)
+
+    def test_stale_gateway_ack_does_not_report_false_spool_success(self):
+        self.queue.accept(sample())
+        def reclaimed_before_ack(payload, endpoint, token):
+            self.assertIsNotNone(self.queue.claim(now=int(time.time()) + 61))
+            return "ack"
+        result = flush_once(self.queue, "https://gateway.example", "dummy",
+                            limit=1, sender=reclaimed_before_ack)
+        self.assertEqual(result, {"sent": 0, "retry": 0, "blocked": 0})
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.assertEqual(self.queue.counts()["sending"], 1)
 
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
