@@ -108,7 +108,7 @@ def main():
                 "user": "65534:65534", "read_only": True,
                 "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"],
                 "mem_limit": "64m", "cpus": "0.25", "pids_limit": 32,
-                "logging": {"driver": "local", "options": {"max-size": "1m", "max-file": "1"}},
+                "logging": {"driver": "local", "options": {"max-size": "1m", "max-file": "2"}},
                 "volumes": [{"type": "volume", "source": "state", "target": "/var/lib/gserver"}],
                 "command": ["python3", "-u", "-c",
                     "from pathlib import Path; import time; p=Path('/var/lib/gserver/app-probe'); "
