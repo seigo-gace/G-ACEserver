@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sqlite3
 import re
+import stat
 
 class ReplayDenied(ValueError):
     pass
@@ -31,11 +32,13 @@ class RequestLedger:
         path = self.db_path
         if not isinstance(path, Path) or path.is_symlink() or path.parent.is_symlink() or not path.parent.is_dir():
             raise ReplayDenied("LEDGER_PATH_INVALID")
-        if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
+        parent_stat = path.parent.stat()
+        if parent_stat.st_uid != os.geteuid() or (parent_stat.st_mode & 0o077):
+            raise ReplayDenied("LEDGER_PARENT_PERMISSIONS_INVALID")
+        if path.exists() and (not path.is_file() or path.stat().st_nlink != 1 or path.stat().st_uid != os.geteuid()):
             raise ReplayDenied("LEDGER_FILE_INVALID")
         if path.exists() and path.stat().st_mode & 0o077:
             raise ReplayDenied("LEDGER_PERMISSIONS_INVALID")
-        previous = os.umask(0o077)
         try:
             with sqlite3.connect(path, timeout=2, isolation_level=None) as db:
                 db.execute("PRAGMA synchronous=FULL")
@@ -50,5 +53,3 @@ class RequestLedger:
                 return True
         except sqlite3.Error as exc:
             raise ReplayDenied("LEDGER_UNAVAILABLE") from exc
-        finally:
-            os.umask(previous)
