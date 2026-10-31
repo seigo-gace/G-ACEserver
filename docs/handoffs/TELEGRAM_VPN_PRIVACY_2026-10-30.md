@@ -178,3 +178,11 @@ NET_ADMIN以外をdropしたrootコンテナは、Host user所有0600ファイ�
 Kill Switchは停止前に成功したpublic IPv4 TCP宛先に対して、VPN停止後も生存する同じappから再試験する。Docker exec失敗・app停止・JSON欠落・未知の結果はFAIL。停止後のapp namespaceが同じで独立guardが不変であることも確認する。DNSはUDP/TCPのDocker組込resolver宛送信と各専用drop counter増加を確認する。IPv6は閉じたloopback portを証拠にせず、namespaceのdisable_ipv6とpublic IPv6宛遮断を確認する。これらもDNS全経路・Proxy/SSRF・実媒体・復旧/速度の総合受入とは別Gate。
 
 任意cloudflaredを有効にすると本番Tunnelへ試験replicaが参加し得るため、このJP/KR出口受入ではcredential指定を拒否する。Cloudflareの実認証・経路・所有zone・隔離Tunnel契約確認後に別Gateで統合する。既存Tunnel/Access/資格情報には変更を加えない。
+
+### R16 / 実機で確認したwg CLI不在への対応（2026-10-31）
+
+R15再試験でapp DNS設定/UID実読取はMaster実機PASS。VPN_EGRESSでGluetun imageの`wg` executable不在によりFAIL。公式v3.41.3 Dockerfileにもwireguard-toolsの導入はない。Hostにもwgは存在せず、既存ip/nsenterを再利用する。イメージ/Hostへの追加インストールはしない。
+
+対象VPN netnsを開いたFDへ固定する既存helperで、読み取り専用の`ip -j -d -s link show dev tun0`を追加する。**linkinfo.info_kind=wireguard・UP・ifindex・namespace inode不変**と、実HTTPS前後のRX/TX両方の増加を必須とする。guard/実HTTPS/出口IP検証と合わせてkernel WireGuard経路の実通信を判定する。通常tun/userspace/不明種類、欠落counter、namespace/interface変更、通信増加なしはFAIL。単にwgエラーを無視したり内部API応答へ戻したりしない。
+
+Handshake時刻そのものは取得せずNOT_COLLECTEDとして分離する。送受信した暗号化経路の証拠と、時刻の直接収集を混同しない。userspace WireGuard受入はこの方式の対象外。Host firewall/routingと秘密鍵は変更・取得しない。公式根拠: https://github.com/passteque/gluetun/blob/v3.41.3/Dockerfile 。
