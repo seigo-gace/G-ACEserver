@@ -204,3 +204,5 @@ Gserver owner-only原本Tokenをcontrollerで検証し、既存sudoの短命help
 事前local image検証は固定済みlocal digestのみ、network none・cap_drop ALL・非root・read_only・資源制限・no pullでversion/helpを取得し、native token-file対応を確認する。credential/既存Tunnelを投入せず外部接続しない。実Tunnel/Accessは所有zone、正式credential経路、既存設定/利用者/rollbackを照合後の別Gate。Account broker未確認を新Token作成やContabo接続で迂回しない。
 
 根拠: https://github.com/cloudflare/cloudflared/blob/master/Dockerfile 、 https://developers.cloudflare.com/tunnel/reference/run-parameters/ 。最新Sourceは取得済みlocal digestの実証を代替せず、local検証と実CF接続も分離する。
+
+R18補強: 元のcontainer tmpfs意図を維持し、Token stagingを新たな平文disk copyにしない。CFを含む実行bundleはHost tmpfs上のprivate directoryを使う。helperは開いたdirectory FDをfindmntで照合しtmpfs以外へは書かない。Compose secrets読込前にfileを準備し、guard/app確認後だけconnectorを起動する。オフライン監査は/dev/shm内のprivate temporary directoryと合成値を使い、同じCompose secrets方式で読取を検証する。
