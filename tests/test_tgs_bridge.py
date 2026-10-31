@@ -351,6 +351,18 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.retry_blocked(), 1)
         self.assertEqual(self.queue.counts()["pending"], 1)
 
+    def test_stale_ack_does_not_override_newer_retry_lease(self):
+        self.queue.accept(sample(), now=100)
+        first = self.queue.claim(now=100)
+        second = self.queue.claim(now=161)
+        self.assertEqual(second[2], first[2] + 1)
+        self.queue.finish(first[0], "ack", first[2], now=162)
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.assertEqual(self.queue.counts()["sending"], 1)
+        self.queue.finish(second[0], "retry", second[2], now=162)
+        self.assertEqual(self.queue.counts()["pending"], 1)
+        self.assertEqual(self.queue.counts()["sending"], 0)
+
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
             status = 202
