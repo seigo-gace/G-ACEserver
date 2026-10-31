@@ -186,3 +186,11 @@ R15再試験でapp DNS設定/UID実読取はMaster実機PASS。VPN_EGRESSでGlue
 対象VPN netnsを開いたFDへ固定する既存helperで、読み取り専用の`ip -j -d -s link show dev tun0`を追加する。**linkinfo.info_kind=wireguard・UP・ifindex・namespace inode不変**と、実HTTPS前後のRX/TX両方の増加を必須とする。guard/実HTTPS/出口IP検証と合わせてkernel WireGuard経路の実通信を判定する。通常tun/userspace/不明種類、欠落counter、namespace/interface変更、通信増加なしはFAIL。単にwgエラーを無視したり内部API応答へ戻したりしない。
 
 Handshake時刻そのものは取得せずNOT_COLLECTEDとして分離する。送受信した暗号化経路の証拠と、時刻の直接収集を混同しない。userspace WireGuard受入はこの方式の対象外。Host firewall/routingと秘密鍵は変更・取得しない。公式根拠: https://github.com/passteque/gluetun/blob/v3.41.3/Dockerfile 。
+
+### R17 / JP受入後のKR pin取得と順次地域試験（2026-10-31）
+
+Master実機でR15/R16修正後のJP実通信・DNS/IPv6遮断・Kill Switch・Core不変がPASS。KR pinは未設定。既存wrapperへ明示`--both`を追加し、JP→KRを順次実行する。新しい常駐基盤や別VPN実装は作らない。
+
+明示flag付きJP試験で、正当なJP通信・guardを確認した後だけ、KR private profileのEndpoint名をUID65534 app内のVPN resolverからIPv4解決する。Host側DNS/DoHへのfallback禁止。結果は1〜16個のpublic IPv4だけを受け入れ、決定的に1個を選ぶ。既存KR pinがあれば変更/再解決しない。IP/hostname/鍵をログやGitへ出さない。DNS候補はWireGuard peer鍵と実KR出口検証を代替しない。
+
+取得候補はメモリに置き、JPのKill Switch・cleanup・Core/Storage不変が全部成功してから、profile hash/既存pin競合を再確認しowner-only既存cacheへ保存する。途中失敗では新pinを保存せずKRも起動しない。JP cleanup後だけ新しいKR namespaceをguard付きで作り、同じ安全GateをKR単独で検証する。同時profile使用を防ぐため、試験開始時に既存gace-vpn namespace利用containerが稼働していれば停止/採用せず拒否する。自動failover/常時運用の復旧完了とはしない。

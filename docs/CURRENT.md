@@ -1,3 +1,11 @@
+# 2026-10-31 Codex｜JP出口の実機受入PASS・KRへ継続
+
+- **Master実機 / Source 0b970cb:** wrapper74 tests PASS。APP_RESOLV_CONF_APPLIED、APP_DNS_VPN_NAMESERVER、実HTTPS/名前解決、日本出口JP、kernel WireGuard通信、Docker DNS UDP/TCP drop、IPv6無効化/public接続拒否、VPN停止後public TCP Kill Switch、Core/Storage/他container不変のすべてPASS。ACCEPTANCE_LIVE_VPN=PASS、VERIFY=PASS、ERROR=NONE、exit0。これは隔離JP試験の範囲に限定した受入。
+- **別Gate維持:** Handshake時刻NOT_COLLECTED。HTTPS0.517/0.692秒は少数サンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN。KR、切替/復旧/安定性、媒体/Vault、F01〜F08の総合受入は未完了。Draft維持。
+- **Next:** KR pin未設定を、受入済みJP VPN内のresolver経由で安全に補完する順次受入を準備する。Host DNSの直接bootstrapなし、JP cleanup完了前のKR起動なし、既存pinを上書きしない。設計R17に従う。
+
+---
+
 # 2026-10-31 Codex｜JP実通信PASS・DNS遮断試験の拒否応答対応
 
 - **Master実機（7bb9056）:** focused72 PASS。app DNS設定/UID読取PASS。固定IPv4/名前付きの実HTTPSとDNS名前解決PASS、日本出口JP一致、kernel WireGuard種類/namespace/interfaceとRX/TX増加PASS。HTTPS試験時間は0.525/0.652秒であり性能合格ではない。Handshake時刻NOT_COLLECTED。Core/Storage/他container不変PASS。
