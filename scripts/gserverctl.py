@@ -91,7 +91,6 @@ class Controller:
                 extra = (
                     "      GSERVER_STORAGE_ROOT: /mnt/g\n"
                     "      GSERVER_FILES_ROOT: /mnt/g/files\n"
-                    "      GSERVER_AUTH_FILE: /var/lib/gserver/auth-token\n"
                 )
                 marker_env = "    environment:\n"
                 if source.count(marker_env) != 1:
@@ -310,7 +309,44 @@ class Controller:
         result = self.run(["exec","gace-gserver-gserver-1","python3","-c",script],capture=True)
         print(result.stdout.rstrip())
 
-    def bot_gateway_config(self):
+    def bot_gateway_preflight(self, payload):
+        """Check container HTTPS/auth and schema rejection before storing
+        any credentials that would automatically release pending Bot events.
+        The URL's private-network authorization is a separate operator gate.\n        The deliberately invalid request must be rejected BEFORE persistence.
+        """
+        probe = (
+            "import json,sys,urllib.error,urllib.request\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import _NoGatewayRedirect,gateway_endpoint,GATEWAY_USER_AGENT\n"
+            "value=json.load(sys.stdin)\n"
+            "headers={'Content-Type':'application/json','User-Agent':GATEWAY_USER_AGENT,'Authorization':'Bearer '+value['token']}\n"
+            "if bool(value.get('access_id'))!=bool(value.get('access_secret')):\n"
+            " raise RuntimeError('GATEWAY_ACCESS_CREDS_INCOMPLETE')\n"
+            "if value.get('access_id'):\n"
+            " headers['CF-Access-Client-Id']=value['access_id']\n"
+            " headers['CF-Access-Client-Secret']=value['access_secret']\n"
+            "req=urllib.request.Request(gateway_endpoint(value['url']),data=b'{}',"
+            "method='POST',headers=headers)\n"
+            "client=urllib.request.build_opener(_NoGatewayRedirect())\n"
+            "try:\n"
+            " with client.open(req,timeout=5): pass\n"
+            "except urllib.error.HTTPError as exc:\n"
+            " if exc.code!=422: raise RuntimeError('GATEWAY_PREFLIGHT_REJECTED')\n"
+            " try: answer=json.loads(exc.read(16384))\n"
+            " except (ValueError,UnicodeError): raise RuntimeError('GATEWAY_PREFLIGHT_INVALID_RESPONSE')\n"
+            " if not isinstance(answer,dict) or answer.get('error')!='invalid internal event':"
+            " raise RuntimeError('GATEWAY_PREFLIGHT_WRONG_ENDPOINT')\n"
+            "else: raise RuntimeError('GATEWAY_PREFLIGHT_ACCEPTED_INVALID_EVENT')\n"
+            "print('GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS')\n"
+        )
+        result = subprocess.run(
+            self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", probe],
+            input=payload, capture_output=True, text=True, timeout=15, check=True)
+        if result.stdout.strip() != "GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS":
+            raise ValueError("gateway preflight result not verified")
+        print("GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS")
+
+    def gateway_auth_inputs(self):
         # Never pass the private internal API token in CLI args, source or stdout.
         url = input("Gateway HTTPS base URL (/internal/events): ").strip()
         parsed = urllib.parse.urlsplit(url)
@@ -321,28 +357,88 @@ class Controller:
         token = getpass.getpass("Gateway INTERNAL_EVENT_API token (hidden): ")
         if not 24 <= len(token) <= 4096 or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
             raise ValueError("invalid Gateway bearer token")
-        payload = json.dumps({"url": url, "token": token})
+        access_id = getpass.getpass("Cloudflare Access Client ID (blank if not used): ")
+        access_secret = getpass.getpass("Cloudflare Access Client Secret (hidden): ") if access_id else ""
+        if access_id:
+            if (not 8 <= len(access_id) <= 255 or not 8 <= len(access_secret) <= 4096 or
+                    any(ord(c) < 33 or ord(c) > 126 for c in access_id + access_secret)):
+                raise ValueError("invalid Cloudflare Access service credentials")
+        return json.dumps({"url": url, "token": token,
+                           "access_id": access_id, "access_secret": access_secret})
+
+    def bot_gateway_config(self):
+        payload = self.gateway_auth_inputs()
+        # Do not store the settings (or release queued events) until the
+        # actual Gserver container verifies private HTTPS + Gateway auth.
+        self.bot_gateway_preflight(payload)
         script = (
-            "import json,os,secrets,sys\n"
+            "import json,os,secrets,sys,stat\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import gateway_configuration_lock,GATEWAY_CONFIG_INCOMPLETE\n"
             "values=json.load(sys.stdin)\n"
-            "for label,name in [('url','gateway-url'),('token','gateway-token')]:\n"
-            " p='/var/lib/gserver/'+name\n"
-            " if os.path.islink(p): raise RuntimeError('SYMLINK_REFUSED')\n"
-            " temp=p+'.tmp-'+secrets.token_hex(8)\n"
-            " fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n"
+            "with gateway_configuration_lock(shared=False):\n"
+            " marker=GATEWAY_CONFIG_INCOMPLETE\n"
+            " if os.path.islink(marker): raise RuntimeError('GATEWAY_CONFIG_MARKER_UNSAFE')\n"
+            " fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)\n"
             " try:\n"
-            "  os.write(fd,values[label].encode('ascii'))\n"
+            "  m=os.fstat(fd)\n"
+            "  if not stat.S_ISREG(m.st_mode) or m.st_mode & 0o077: raise RuntimeError('GATEWAY_CONFIG_MARKER_UNSAFE')\n"
             "  os.fsync(fd)\n"
-            " finally:\n"
-            "  os.close(fd)\n"
-            " os.replace(temp,p)\n"
-            " os.chmod(p,0o600)\n"
+            " finally: os.close(fd)\n"
+            " for label,name in [('access_id','gateway-access-client-id'),('access_secret','gateway-access-client-secret'),('token','gateway-token'),('url','gateway-url')]:\n"
+            "  p='/var/lib/gserver/'+name\n"
+            "  if os.path.islink(p): raise RuntimeError('SYMLINK_REFUSED')\n"
+            "  temp=p+'.tmp-'+secrets.token_hex(8)\n"
+            "  fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n"
+            "  try:\n"
+            "   data=values[label].encode('ascii')\n"
+            "   if os.write(fd,data)!=len(data): raise RuntimeError('GATEWAY_CONFIG_SHORT_WRITE')\n"
+            "   os.fsync(fd)\n"
+            "  finally: os.close(fd)\n"
+            "  os.replace(temp,p)\n"
+            "  os.chmod(p,0o600)\n"
+            " os.unlink(marker)\n"
             "print('GATEWAY_PRIVATE_CONFIG=SET')\n"
         )
         result = subprocess.run(
             self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", script],
             input=payload, capture_output=True, text=True, timeout=30, check=True)
         print(result.stdout.rstrip())
+
+    def bot_gateway_canary(self):
+        """One Gateway canary; never store settings or claim the live Bot spool."""
+        payload = self.gateway_auth_inputs()
+        self.bot_gateway_preflight(payload)
+        probe = (
+            "import json,sys,uuid\n"
+            "from datetime import datetime,timezone\n"
+            "sys.path.insert(0,'/opt/gserver/app')\n"
+            "from tgs_bridge import envelope,validate,send_gateway\n"
+            "value=json.load(sys.stdin)\n"
+            "headers={}\n"
+            "if value.get('access_id'):\n"
+            " headers['CF-Access-Client-Id']=value['access_id']\n"
+            " headers['CF-Access-Client-Secret']=value['access_secret']\n"
+            "event={'bot':'gserver-probe','event_id':'probe-'+uuid.uuid4().hex,\n"
+            "       'event':'bot.started','level':'info','outcome':'PASS'}\n"
+            "data=envelope(validate(event),occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'))\n"
+            "print('PRODUCER_EVENT_ID='+data['eventId'],flush=True)\n"
+            "outcome=send_gateway(data,value['url'],value['token'],access_headers_override=headers)\n"
+            "if outcome!='ack': sys.exit(11)\n"
+            "print('GATEWAY_CANARY_202=PASS')\n"
+        )
+        result = subprocess.run(
+            self.docker + ["exec", "-i", "gace-gserver-gserver-1", "python3", "-c", probe],
+            input=payload, capture_output=True, text=True, timeout=20)
+        output = result.stdout.strip().splitlines()
+        # Print only a known public correlation key, never raw subprocess output.
+        if not output or not re.fullmatch(
+                r"PRODUCER_EVENT_ID=gserver:gserver-probe:probe-[a-f0-9]{32}", output[0]):
+            raise ValueError("gateway canary correlation missing")
+        print(output[0])
+        if result.returncode != 0 or output[-1] != "GATEWAY_CANARY_202=PASS":
+            raise ValueError("gateway canary not confirmed")
+        print("GATEWAY_CANARY_202=PASS")
 
     def action(self, action, image=None):
         if action == "recover":
@@ -351,7 +447,7 @@ class Controller:
             raise ValueError("interrupted operation; run recover first")
         if action == "activate":
             return self.activate(image or "")
-        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"):
+        if action in ("bot-init", "bot-status", "bot-smoke", "bot-gateway-canary", "bot-gateway-config", "bot-retry"):
             release = self.load()
             if not release.get("current"):
                 raise ValueError("Gserver must be activated first")
@@ -363,6 +459,8 @@ class Controller:
                 return self.bot_smoke()
             if action == "bot-retry":
                 return self.bot_retry()
+            if action == "bot-gateway-canary":
+                return self.bot_gateway_canary()
             return self.bot_gateway_config()
         release = self.load()
         if action == "rollback":
@@ -420,7 +518,7 @@ class Controller:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-config", "bot-retry"])
+    parser.add_argument("action", choices=["activate", "start", "stop", "status", "logs", "rollback", "recover", "enable-local", "disable-local", "enable-storage", "disable-storage", "storage-list", "bot-init", "bot-status", "bot-smoke", "bot-gateway-canary", "bot-gateway-config", "bot-retry"])
     parser.add_argument("image", nargs="?")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -1,3 +1,194 @@
+# 2026-10-31 Codex｜Master追加委任：server-core Workspace / 共通Terminal / Agent Loop
+
+- **追加要件:** Gserverでもserver-coreを司令室に全開発をWorkspace内で扱い、既存ServerTerminalからContabo/Gserverを区別して操作、GitHub Projectの既存Agent Loop/Ruleを再利用する。[採用設計](architecture/WORKSPACE_SERVERCORE.md)。VPN/Cloudflare・F01〜F08を縮小しない。今回の統合調査に限りContaboも対象、無関係なVPSサービスの変更許可ではない。
+- **途中成果復元:** Control #10の2026-10-31コメント6535887127/6536859483に同じGserver Terminal CUがある。既存routeのHost root/destinationはVPS固定、Gserver未登録。単なるWSL path追加でPCへ届くとはしない。P015既存登録/Topicを作り直さず、Gateway/Vault正式契約→PC Producer E2E→Gserver Terminal E2Eという既存依存順を維持。Source writerを二重化しない。
+- **実装・local実測:** 同一upstream server-core c688961d29a7485c9a4d949a95c1991a452c7ec8のlocal checkoutを取得（別fork/別指令室ではない）。所有helper expected_workspaceを再利用する薄いadapterを追加し、server-core先頭/既存Projects rootを参照するWorkspaceと最小入口を生成（core側VPS path用のlocal adapterを含む4file）。local install/読戻しPASS、shared checkout tracked差分なし。元データ移動、MCP/token/AI/model変更、VPS/Gateway本番変更なし。
+- **検証:** 新規adapterの10 tests PASS（origin/dirty Source拒否、path alias拒否、既存設定保護、同一fileへの冪等性、途中失敗と並行置換保護、配置PASSと遠隔権限の分離）。local install/読戻しPASS、diff check PASS。VPN/Cloudflare Sourceはこの追加作業で変更していない。
+- **未受入:** Native Cursor/VS Codeの実Rule読込、GitHub Project登録/Current復元の実client動作、Contabo経路の今回live readback、Gserver Receiver/Writer/Sink・遠隔操作、Agent Loopの実継続/復旧はNOT_VERIFIED。配置PASSで移植完成とはしない。Cloudflare既存認証Gate/性能/復旧も未完了。
+- **継続順:** Workspace入口→VPN/Cloudflare正式認証/到達性→P015/Gateway/Vault/PC Producer→既存共通TerminalのHost target分離とGserver実行・結果相関→Contabo回帰/誤認証/SHA/二重配送/offline/復旧。提供元Source/Runtime変更の具体案は元CU/Ownerと照合してから実行する。
+
+---
+
+# 2026-10-31 Codex｜Cloudflare offline実機PASS・限定照会Source・認証Gate保留
+
+- **実機証拠維持:** Master返却のoffline image auditはSource e4e7356、重点96 tests、cloudflared 2026.10.7/native UID65534/token-file/合成private secret読取/network none/既存container不変PASS。実credential不使用、Provider操作なし。JP/KR実通信・DNS/IPv6・Kill Switchの既存PASSも維持する。Cloudflare E2E/性能/常時復旧/F01〜F08総合は未完了。
+- **Source実装:** R19の明示`--cloudflare-discover`を追加。Windows標準origin certificateのACL/hash/accountを先に検証し、JP VPN正規通信/guard確認後、native cloudflaredでlocal credentialと一致するIDだけ`list --output json --id`照会。run/route/delete/replica参加なし。原本・Provider診断を表示せず、JP Kill Switch/cleanup/Core不変成功後だけprivate metadataを保存。常用token-file接続とは別のread-only discoveryで、Cloudflare受入へ昇格しない。
+- **現在の認証Gate:** Windows実ACLは現在user/SYSTEM/管理者に加え、sandbox用と確認できるlocal groupと、名前解決できないSIDの継承ACEあり。第三者が現存/利用しているとの断定はしない。現行の厳格allowlistに不一致のためWINDOWS_ORIGIN_CERT_ACL_UNVERIFIED。Docker/証明書読取/staging/Provider照会前に停止する。元ACLの自動変更・既存sandbox group削除・新Token発行はしない。Masterへ同じ失敗が確実なコマンドを再実行依頼しない。
+- **検証:** 新規の拒否/対象限定/診断非表示/private staging/receipt/失敗cleanup試験を含む全回帰332 tests PASS、shell構文/diff check PASS。新しいCloudflare discoveryの実Provider結果はNOT_RUN、CI NOT_VERIFIED。既存Core/Storage/Host firewall/Windows原本/Cloudflare設定に変更なし。
+- **再開条件:** 認証の正式利用境界（sandbox ACL/未解決SIDの由来、または既存正式broker接続）を確定してからJP内の限定照会へ進む。Windows原本の権限を変更する場合は、影響/rollbackを先に具体化し個別承認を得る。用途/zone所有/既存routeの確認までは実Tunnel起動・DNS/Access変更をしない。Draft PR #15を維持。新Token/基盤/Contaboによる迂回は禁止。
+
+---
+
+# 2026-10-31 Codex｜Cloudflare local image/秘密供給の実機PASS・Windows既存credential発見
+
+- **Master実機 / Source e4e7356:** wrapper96 tests PASS。local cloudflared version2026.10.7、UID65534 native実行、token-file対応、private tmpfs staging→Compose secrets UID読取、既存container不変がPASS。network none、実credential不使用、Provider操作なし。VERIFY=PASS/ERROR=NONE/exit0。Cloudflare E2Eは引き続きNOT_RUN。
+- **既存設定の発見:** Windowsの現在user用標準cloudflared directoryにlocal-managed Tunnel credential JSONとorigin certがある。JSONの必須field/filename対応、certとJSONのaccount一致を値非表示で確認。標準config.yml/yamlはなし。Windows cloudflared service metadata照会は0件（service不在でありProvider上のTunnelや手動process不存在の証拠ではない）。原本の変更/credential複製/Provider送信はしていない。実パス・ID・Secretはpublic Currentへ書かない。
+- **契約差:** 発見したものはlocal-managed JSON/origin certificateで、今回Source対応したremotely-managed token-fileと同じ形式ではない。自動変換/新Token発行/用途未確認Tunnelへのreplica参加はしない。旧Astera Gatewayとの接続成功をGserverの利用権限に流用しない。
+- **Next gate:** Windows既存origin certificateの正式利用境界と対象Tunnel/zone/稼働routeをread-onlyで照合する方式を確定する。必要ならJP VPN内の公式cloudflared CLIで限定的resource discoveryを行い、source認証原本とCF設定を保護する。用途/所有zone/影響が確定するまで実Tunnel起動やDNS/Access変更をしない。共有Account brokerはローカル未利用、Contabo経路に迂回しない。JP/KR隔離PASSは維持、性能/自動復旧/媒体/Vault/F01〜F08総合は未完了。
+- **記録制約:** 前回のIssue #9追記は自動承認reviewの利用上限で未実行だった。Sourceと先行Currentはe4e7356へpush済み。この更新は最新実機返却と限定read-only調査の記録。
+
+---
+
+# 2026-10-31 Codex｜JP→KR順次実機PASS・Cloudflareへ継続
+
+- **Master実機 / Source2822b2f:** wrapper86 tests PASS。JPは実HTTPS/JP出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。JP内でKR candidateを取得しJP cleanup・不変確認後にprivate pinを保存、KRを新namespaceで起動。KRも実HTTPS/KR出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。両方VERIFY=PASS/ERROR=NONE/exit0。実IP/鍵/hostnameは公開しない。
+- **範囲:** Handshake timestamp NOT_COLLECTED。JP0.562/0.586秒・KR0.609/0.837秒は少数HTTPSサンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN、常時運用/自動切替/復旧/媒体/Vault/F01〜F08は別の未完了Gate。
+- **Cloudflare調査:** server-coreのCloudflare/Shared Secret契約を取得。既定cloudflared設定とCursor MCP設定、ローカルbroker認証経路なし。ローカル契約portは待受なし。既存Gserver settingsにはCloudflare関連keyなし。Account brokerとTunnel credentialは別契約。Contaboへ接続せず、Astera/共有Providerも不変更。Masterへ既存設定の所在を照会中（値の貼付は不要）。
+- **Cloudflare Source:** R18に従いshell待機/Token argvを除去、native token-file、IPv4 edge、VPN DNS Configへ修正。元Token0600と親dir0700を保持し、短命sudo helperがowner一致private tmpfs dir FD内の固定新規fileをUID65534/0400で作成してread-only secret mountする。O_EXCL/O_NOFOLLOW、stdinのみ、既存上書き拒否。Core・VPN guardは不変更。
+- **次:** `bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --cloudflare-local` で既存local digestのnative version/helpと合成fileのCompose secrets非root読取をnetwork noneで検証。重点wrapper96 tests PASS（readinessを含む重点98 PASS）。確定Sourceの全回帰318 tests PASS、shell構文/diff check PASS。実機監査は結果待ち、CIは未確認。実Tunnel/Account APIは所有zone/既存設定/正式認可が確認できるまで未実行。
+
+---
+
+# 2026-10-31 Codex｜JP出口の実機受入PASS・KRへ継続
+
+- **Master実機 / Source 0b970cb:** wrapper74 tests PASS。APP_RESOLV_CONF_APPLIED、APP_DNS_VPN_NAMESERVER、実HTTPS/名前解決、日本出口JP、kernel WireGuard通信、Docker DNS UDP/TCP drop、IPv6無効化/public接続拒否、VPN停止後public TCP Kill Switch、Core/Storage/他container不変のすべてPASS。ACCEPTANCE_LIVE_VPN=PASS、VERIFY=PASS、ERROR=NONE、exit0。これは隔離JP試験の範囲に限定した受入。
+- **別Gate維持:** Handshake時刻NOT_COLLECTED。HTTPS0.517/0.692秒は少数サンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN。KR、切替/復旧/安定性、媒体/Vault、F01〜F08の総合受入は未完了。Draft維持。
+- **Source追加:** 明示`verify_vpn_live_host.sh --both`で、JP内のVPN resolverによるKR pin候補取得→JP Kill Switch/cleanup/Core不変→profile/cache再照合・owner-only保存→KR新namespace試験を順次実行する。既存pin変更なし、Host DNSなし、失敗時KR実行なし。gace-vpn groupの既存稼働containerは停止/採用せず拒否。重点86 tests PASS（DNS候補拒否/競合、保存順序、cleanup失敗、shell順次停止を含む）。確定Sourceの全回帰308 tests PASS、shell構文/diff check PASS、CI NOT_RUN。
+- **Next:** 同じWSL端末で `GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --both`。本人sudo認証がCodexシェルへ共有されないため実機実行のみMasterへ依頼。KR受入、切替/復旧/性能・Cloudflareはまだ未合格。
+
+---
+
+# 2026-10-31 Codex｜JP実通信PASS・DNS遮断試験の拒否応答対応
+
+- **Master実機（7bb9056）:** focused72 PASS。app DNS設定/UID読取PASS。固定IPv4/名前付きの実HTTPSとDNS名前解決PASS、日本出口JP一致、kernel WireGuard種類/namespace/interfaceとRX/TX増加PASS。HTTPS試験時間は0.525/0.652秒であり性能合格ではない。Handshake時刻NOT_COLLECTED。Core/Storage/他container不変PASS。
+- **未到達:** NET_GUARDSのUDP送信（inline Python line3）でEPERMによりFAIL。DNS UDP/TCP遮断・IPv6・Kill Switch・全体VPN受入・Cloudflareは未合格。前段の実通信PASSを全体完成へ拡大しない。
+- **最小修正:** Docker DNS宛UDP送信のEPERM/EACCESのみ結果deniedとして返し、通常sentと同様に独立nft UDP/TCP両drop counter増加・namespace/guard不変を必須とした。permission denialだけで合格にせず、counter増加なし/未知errno/Docker exec失敗はFAIL。socketはfinallyでclose。保護設定・Core/Storage・image不変。
+- **Source検証:** 全回帰296 tests PASS、wrapper重点74 tests PASS、shell/diff PASS。修正後の実機結果は待機中。
+- **次:** 既存wrapperでJP受入を再実行（74 focused tests）。本人の同一WSL端末が実機実行を担当、Codexは解析/修正を継続。KR pin/復旧/性能/Cloudflare統合・F01〜F08最終受入は維持して未完了。CI NOT_RUN。
+
+---
+
+# 2026-10-31 Codex｜DNS実機PASS・wg不在による試験修復
+
+- **Master実機（3fe4aeb）:** focused70 PASS。readinessはJP pin/profile/local immutable imagesあり、KR pinなし。`APP_RESOLV_CONF_APPLIED=PASS`・`APP_DNS_VPN_NAMESERVER=PASS`。VPN_EGRESSで `wg: executable file not found` によりFAIL。Core/Storage/他container不変PASS。VPN通信・DNS遮断・Kill Switch・Cloudflare受入へは未到達。
+- **原因/修正:** Gluetun公式v3.41.3 DockerfileとHost実在ツールを確認。wgはどちらにもなく、Host既存ip/nsenterを再利用する。R16を実装前に保存。既存のnamespace FD固定helperへ読取専用ip link詳細/統計取得を追加し、kernel wireguard種類/UP/namespace inode/ifindex不変・実HTTPS前後RX/TX増加を必須とした。通常tun/不明/欠落/不増加はFAIL。Handshake時刻はNOT_COLLECTEDとして分離。パッケージ追加・image変更・保護解除なし。
+- **Source検証:** 確定Sourceの全回帰294 tests PASS、既存wrapperと同じ重点72 tests PASS、shell構文/diff check PASS。修正後の実機結果は待機中、CIはNOT_RUN。
+- **次の実機:** `GSERVER_VPN_REGION=jp GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh"`。Codexシェルへ本人sudo認証は共有されないため、同じWSL端末で実行が必要。修正後Runtime/CIは未検証、既存Core/Storageの停止や再配置なし。受入目的はJP→KR/復旧/性能→Cloudflare統合のまま維持。F01〜F08未完了。
+
+---
+
+# 2026-10-31 Codex継続｜最新引継ぎ照合・VPN実機受入の判定修正
+
+- **正本/場所:** Rule #16、Issue #9、[最新委任](https://github.com/seigo-gace/G-ACEserver/pull/15#issuecomment-6535675565)を取得。D側既存checkout/branchのHEADとGitHub headが`ed111a3`で一致。worktreeは既存1件、stashなし。開始時の未追跡空ファイル`FETCH_HEAD`は既存物として保持。別writerの変更は検出せず、Codexがこの既存branchのVPN受入修正を担当。G旧copyは無変更。
+- **維持した実績:** generic app共存/永続化/rollback、kernel guard、電源断後Core/Storage/SQLiteは以前のMaster実機PASS報告として維持。現在の実機PASSを取り直したとはしない。F01〜F08/46タスク維持、F04は後回し。
+- **現物照合:** JP/KR private profileの権限・構文検証PASS（秘密値非表示）、JP endpoint pin設定あり、KRは未設定。`ed111a3`の非秘密DNS0644/secret0600/UID65534実読取修正をSourceで確認。実appへの適用確認は実機待ち。
+- **R15設計/修正:** 内部APIのキャッシュ応答や停止を実通信/Kill Switchの根拠にしていた試験を修正。appから実HTTPS、WG直近handshake/転送量増加、DNS UDP/TCP drop counter、IPv6無効化/public宛遮断、同じappの停止前public TCP成功→VPN停止後遮断とnamespace/guard不変を確認する。execエラー・不正結果・拒否応答を遮断PASSにしない。Cloudflare credentialをこの出口試験へ投入しない（本番Tunnel replica参加防止）。[R15](handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)、[実行契約](architecture/VPN_RUNTIME.md)参照。
+- **検証:** 確定Sourceの全回帰292 tests PASS、VPN/guard/live/F01重点73 tests PASS、shell構文・diff check PASS。既知F01単体テストのread-only Path属性mockを一時ファイルによる実パーサ検査へ修正。CIはNOT_RUN。実Docker/netns/WireGuardの新規PASSは記録していない。Core app/Dockerfile/deployに差分なし。
+- **Runtime制約:** このCodexシェルの`sudo -n`はpassword required。認証を迂回せず、本人の同一WSL端末で既存wrapperを実行する。Core/Storage/Host firewall/Windows/Cloudflare/Vault/Contaboは操作していない。日本VPNの実機受入は未完了。KR、復旧/速度/安定性、Cloudflare Tunnel/Access/connector DNS/起動方式、媒体、Vault等も未受入。Draft維持。
+- **Exact Next:** `GSERVER_VPN_REGION=jp GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh"`。Masterの本人sudo認証が必要なのは実機実行だけ。返却されたphase/codeをCodexが解析・修正し、元のJP受入へ戻る。JP後にKR/復旧/性能とCloudflareを順次検証。SourceテストとRuntimeを混同しない。
+
+---
+
+# 2026-10-31 Cursor Composer｜VPN根本監査・Kill Switch修復
+
+- **確定不具合:** live smoke の Kill Switch 段階が `KILL_SWITCH_LEAK` を broad `except` で捕捉し **漏洩を PASS 化**していた → `assert_vpn_stop_blocks_publicip()` に分離・回帰テスト追加。
+- **確認済み:** JP 単独 preflight は `validate_live_preflight()` で選択地域のみ（KR 未設定可）。診断は `LIVE_FAILURE_CODE` + `LIVE_COMMAND_ERROR`（Gluetun ERROR 行優先）。
+- **Gluetun v3.41:** `WIREGUARD_ENDPOINT_*`, `DNS_SERVER=on`, `FIREWALL_OUTBOUND_SUBNETS=<pin>/32`（HEAD `ea0459a` 以降）。
+- **境界:** kernel guard smoke / Source unittest / live VPN は別ラベル（`ACCEPTANCE_*`）。Cloudflare Access E2E は未検証のまま。
+- **Master 1ブロック:** `bash scripts/verify_vpn_live_host.sh`
+
+---
+
+# 2026-10-31 Cursor Composer｜VPN/Cloudflare live smoke（Source）
+
+- **実装:** `smoke_gserver_vpn_live.py`（実WireGuard egress・DNS/IPv6拒否・kill switch・任意cloudflared）、`gserver_vpn.py set-endpoint-pin` / `pull-reference-images --confirm-registry-pull` / render時のendpoint-cache利用、`gserver_connection_readiness.py --local-status`。
+- **Source:** VPN関連 **38+ tests PASS**（live smoke契約含む）。**CI未実行**。
+- **Composer Runtime:** sudo cacheなし・`endpoint-cache.json` の jp/kr が空・Gluetun/cloudflared digest未確認のため **live smoke未実行**。kernel guard smoke PASSは維持、実VPN/Cloudflare受入は **NOT_VERIFIED**。
+- **Master Exact Next（1ブロック）:** 下記VPN_RUNTIMEの live smoke 節。Windscribe UIで確認した endpoint IPv4 を `set-endpoint-pin` 後、`pull-reference-images --confirm-registry-pull` → `smoke_gserver_vpn_live.py`。Tunnel tokenは `GSERVER_CLOUDFLARED_CREDENTIAL` のみ。
+
+---
+
+# 2026-10-31 Cursor Composer｜F01/F03/F04 読取専用Gate
+
+- **実装:** `audit_f01_wsl_boot.py`（WSL `[boot] systemd`・systemd unit・`sudo -n docker info`）、`windows_f01_boot_readonly.ps1`（WSL直呼びScheduledTask件数のみ）、`f03_storage_mount_audit.py`（G: mount fingerprint・quota snapshot・USB断試験はNOT_RUN）、`gserver_f04_readiness.py`（mount probe + `kb_source.inspect`）。`verify_gserver_resume.sh` に3 WSL auditを追加。契約テスト9件追加。
+- **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **255 tests PASS**（Composer shell、CI未実行）。
+- **Composer実測（区分）:** F03 mount audit **VERIFY=PASS**（G: mounted、quota OK）。F04 **VERIFY=FAIL**（`/mnt/f` 未mount、想定内）。F01 **VERIFY=FAIL**（Composer shellはsudo cacheなしでdocker拒否；`verify_gserver_resume.sh` は `sudo -v` 後なのでMaster端末ではPASS想定）。Windows F01 PS1は**未実行**。
+- **Exact Next:** Master端末で `verify_gserver_resume.sh` 一括→必要なら `windows_f01_boot_readonly.ps1`。F: ro mount後 `gserver_f04_readiness.py` / `gserver_kb.py --verify-hashes`。Gluetun/cloudflared pull/build・実Bot Tokenは保留。F01〜F08全体未完了。
+
+---
+
+# 2026-10-31 Cursor Composer｜Issue #9 / PR #15 引継ぎ・実装継続
+
+- **引継ぎ:** [Issue #9 2026-10-31 Composer指示](https://github.com/seigo-gace/G-ACEserver/issues/9)とPR #15（logging修正 `d38e5fc`、VPN namespace helper・R14）をD側 `/home/gace/Project/Gserver/repository` で受領。編集元はD側ext4のみ。G側 `/mnt/g/Project/Gserver/repository` は触らない。Core loopback `/health` 200をComposer shellで確認。
+- **ローカルツリー:** branch `chat/gserver-generic-app-runtime-20261030`、GitHub比 `0 behind / 1 ahead`（local `7c2d1ca` 設計R14追記）、未コミット6件＝`gserver_vpn.py` namespace sudo helper・guard fingerprint・VPN/app段階起動、`smoke_gserver_vpn_guard.py`+tests、APPS/VPN_RUNTIME文書、app smoke成功receipt保存、`verify_gserver_resume.sh`にkernel guard smoke追加。
+- **Source回帰:** `python3 -B -m unittest discover -s tests -q` → **238 tests PASS**（VPN helper/guard smoke offline含む）。CI未実行。
+- **Runtime（Master端末 2026-10-31）:** recovery readback PASS。**2app generic smoke VERIFY=PASS**（`PROBE_PRIVATE_SUCCESS=SAVED`）。**namespace guard kernel smoke VERIFY=PASS**（peer canary baseline、loopback許可、guard後peer遮断、drop counter増加、Core/Storage/他container不変）。WireGuard/WAN/Cloudflareは未試験どおり。R14のkernel実証Gateは**この範囲で受入済み**（JP/KR接続・漏洩・速度・cloudflared統合は未受入）。
+- **C/D:** FINAL_ACCEPTANCEどおりC=Windows最小・D HDD上WSL ext4をLinux実行元。recovery baselineでD側git status中央値≈3.5ms、G旧copy≈221ms（read-only receipt）。無断WSL移設・Cursor User Data移動・Docker prune/build/pull禁止を維持。
+- **Git（2026-10-31）:** `chat/gserver-generic-app-runtime-20261030` を **GitHubへpush済み**（`d38e5fc`→**`e407a49`**）。PR #15 head=`e407a49`、Draft維持。SSH `git@github.com` 経由。
+- **Exact Next:** `gserver_vpn.py preflight` でlocal pinned image有無のみ確認（pull/buildなし）。bundle `render`（cloudflared optional）→ `gserver_connection_readiness.py` で slot 確認→実鍵/Token投入は `WAIT_REAL_CONNECTION`。F01/F03/F04/F05/F08は独立可能範囲を継続。F01〜F08全体未完了。
+
+---
+
+# 2026-10-31 追補｜独立app起動失敗の原因確定・修正
+
+- **原因確定（Master実機）:** Docker daemon/State.Error=`failed to initialize logging driver: compression cannot be enabled when max file count is 1`。検証用Composeのlocal loggingが既定圧縮ONのままmax-file=1だった。Python/app/認証/Volume故障ではなく、ログdriver初期化でprocess起動前に拒否されたことを確認。exit128/OOM=Falseと整合する。
+- **修正:** probeのlocal loggingをmax-size=1m/max-file=2へ変更し、容量上限・圧縮を維持。汎用app CLIもlocal driverの「圧縮ON + max-file=1」をverify段階で拒否し、同原因の再発を防止。既存Coreのloggingは元からmax-file=3であり変更不要。VPN rendererはmax-file=2であり今回の欠陥なし。
+- **検証:** 重点24 tests PASS、diff check PASS。圧縮ON/保存数1の拒否、保存数2/default・明示圧縮OFF/保存数1の許可を回帰確認。修正後の実app起動/共存/永続化/更新復帰はMaster端末sudo後のsmokeで受入（Composer shell単体では未再実行）。Core/Storage/SQLiteの復帰PASS・spool2・他container不変は保持。
+- **Exact Next:** 上記Composer節の `verify_gserver_resume.sh` 一括実行。Core再起動・daemon設定変更・Firewall/capability緩和・image build/pullなし。
+
+---
+
+# 2026-10-31 追補｜Master返却の電源断後受入・app exit128
+
+- **Master実機:** 20 app tests / 3 recovery tests PASS。同一端末sudo後、Core health、container Healthy、認証付きStorage ready/files、SQLite quick_checkすべてPASS、spool_rows=2。`current_recovery_checks=PASS`。Windows→WSL自動起動、電源断前後全データ比較、全体復元受入は従来どおり未証明。
+- **独立app:** `APP_SMOKE_APP_START` FAIL、`PROBE_EXIT_CODE=128`、OOMKilled=False、process logs取得不可。cleanup後Core/Storage/他container不変PASS。Docker/OCIの起動前エラーが疑われるが、**原因はまだ確定していない**。capability/認証/Firewallを緩める修正は行わない。
+- **診断修正:** 以前の取得漏れだったDocker `State.Error` とCompose stdout+stderrを、random合成projectに限定してcleanup前に取得。表示では私有path/IP/opaque値を除去、完全な合成起動エラーだけをWSL private state `gserver/verification/app-smoke-error.json`へ0600保存。実app Config/Env/Token/SQLite内容は収集しない。重点23 tests PASS（起動前エラー・log欠落・私有表示/保存の回帰3件追加）。
+- **次の最小実測:** 復旧受入全体を再実行せず、同じWSL端末でsudo認証→D側 `scripts/smoke_gserver_apps_host.py`のみ実行。原因エラー/receiptを用いて修正を継続する。本人のsudo認証はCodex側端末へ引き継げず、直接Docker読取は未達。既存Docker journalの限定読取でも該当起動エラーは取得できなかった。
+
+---
+
+# 2026-10-31 Codex｜電源断後の確認・D側編集元統一・通信保護設計レビューと実装
+
+- **Owner/場所:** 本対話のCodexが継続。G側旧copyとD側WSL ext4のHEAD/branch/clean一致を実測後、D側を唯一の編集元へ固定。G側は無変更で保護。D側だけ新しいdesign/sourceを持つため、以後G側で実装/commitしない。Cursorは起動中で既存のWindows配置にjunctionなし。認証/履歴/GUI完全切替は未受入、live User Data移動/再導入は実施しない。
+- **電源断実測:** Windows起動と、その後の別時刻のWSL bootを確認。Docker/containerdはactive/enabled、Core loopback health 200。これは現在の部分復帰でありWindows→WSLの自動復帰を証明しない。現在の本人sudo cacheが使えず、認証付きStorage/SQLite quick_checkの追加読戻しはNOT_VERIFIED。電源断前fingerprintがないので全データ一致をPASSにしない。Core/Storage/Volume/Spoolを変更していない。
+- **実装前レビュー:** 指定design branch `84aa6908`の文書を取得し、R01〜R13を統合。[レビュー済み正本](handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md)のdesign commits `cbcd0dd`/`448f545`/`fe02401`/`e85efa7`を実装より先に保存。F01〜F08/46タスク維持。対象appとcloudflaredのVPN経由/IP秘匿を必須とし、Cloudflare防御、Vault契約、速度/攻撃隔離/復旧を維持。Contabo不使用。他app/共有提供元を変更しない。
+- **実設定:** Master指定DesktopのJP/KR両profileを確認、原本を残しWSL private stateへ0600で安全に保存。両方の鍵形式・構文検証PASS。実設定はdual-stack+hostnameのため原本をIPv4に書き換えず、別runtime設定へ変換する。endpoint自動DNSを避け、明示public IPv4 pinを必須にした。既存Windows DNS cacheの一致A recordは0件で、新しい外部DNS問い合わせは実行していない。秘密鍵/実endpoint/アカウント情報はGit/出力に含めない。両地域の接続/出口IPはNOT_VERIFIED。
+- **Source実装:** [VPN_RUNTIME](architecture/VPN_RUNTIME.md)参照。`gserver_vpn.py`にprivate profile検証・immutable image構成生成・guard先行namespace起動・hash再照合・失敗時の当該project stopを追加。独自VPN製品を作らずGluetunとLinux nftablesを利用。全cap dropのappにNET_ADMINを渡さず、秘密はstdin→VPN tmpfs、DNSはinline read-only config。新規image build/pullなし、本番VPN/Cloudflare設定は未実施。
+- **現段階の実装限界:** rendererはVPN+appの足場。cloudflared実組込、実Bot契約/Token/永続data、公開入口/ドメイン/Access/WAF/正式Vault接続、JP/KR実接続・kernel漏洩/攻撃/復元・速度Gateは未受入。endpoint pinと監査済みlocal image digestが揃うまで実VPN起動はしない。構成解析や模擬テストを秘匿済み/性能合格と呼ばない。
+- **前回app失敗の扱い:** Master実行20 tests PASS、実probe `APP_SMOKE_APP_START` FAIL、cleanup後Core/Storage/他container不変PASSを採用。原因はまだ未確定。失敗時のsafe detail、合成container exit/OOM・例外分類・Docker理由をcleanup前に取得する修正を追加。認証拒否と起動失敗を混同しない。
+- **検証:** 全回帰226件PASS。VPN重点20件、復旧3件、既存app20件を含む（追加network拒否テスト後のVPN重点は21件PASS）。実Composeで保護構成/inline DNS/秘密非混入のconfig解析PASS。shell syntax/diff check PASS。kernel nftables/WireGuard/実VPN・CF/TG/Vault接続・CI・本番配置はNOT_VERIFIED。ローカルhealth30サンプルとG/D Git操作時間をprivate receiptに保存したが、VPN性能比較/正式速度Gateの合格ではない。
+- **次の実機確認:** D側既存checkoutで `bash scripts/verify_gserver_resume.sh`。同一端末sudo認証→Owner Storage/SQLite読戻し→修正済み2app probeと安全な診断/cleanupを一括実行。Host/Windows設定・Core再起動をしない。VPNは別のisolated接続Gateで検証する。GUI/Windows Cursor移設は依存・停止/復旧の確認前に行わない。全体F01〜F08は未完了。
+
+---
+
+# 2026-10-30 Codex｜汎用アプリ管理の統合・保護修正（F02/S2、F07）
+
+- **目的・優先:** [Master訂正](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6513092077)と原F01〜F08を照合。既存Core/認証/G: Storage PASSを維持し、独立Composeアプリ→共存・復旧→Windows起動継続性→Storage未受入保護→F04/F05→F08の順で進める。詳細な操作・復旧は [APPS_RUNTIME](architecture/APPS_RUNTIME.md)。
+- **Source:** 既存PR #15 / `chat/gserver-generic-app-runtime-20261030`を再利用。PC既存branch `710d04f`までの未マージ修正をmergeして消失を防止。Coreのapp/Dockerfile/deploy/.dockerignoreは同PC branchから差分0、実行中コンテナやvolumeの変更なし。
+- **修正:** 個別アプリの明示network/volume名による他プロジェクト共有、driver経由Host mount、app外bind/secret/config、Host権限hook等を拒否。検証済みComposeの一時canonical snapshotで操作し、検証後の定義再読込を除去。ログ内容は明示 `--show-logs` の時だけ表示。基本操作にbuild/pull/down/volume削除なし。
+- **PC受入Source:** 既存Coreのlocal imageだけで2個の合成アプリを隔離起動するforeground probeへ拡張。共存・停止分離・永続化・設定更新/旧設定復帰・status/logs・Core認証付きready/files応答hash・全既存containerのID/image/start time/state/mount不変を確認。新規random projectだけをguardし、成功/失敗時ともprobe自身のcontainer/volumeをcleanup。アプリ実機PASSはまだない。
+- **検証:** 既存全回帰199件PASS（loopback待受が必要なためsandbox外実行）。追加のcleanup境界4件を含む重点20件PASS。実Docker Compose v5.6.1のcanonical JSON再読込・literal dollar保持PASS、shell syntax・diff check PASS。CI未実行。新probe実行は `APP_SMOKE_DOCKER_SUDO_AUTH_REQUIRED` で停止（container起動0、Core変更0）。認証情報は収集していない。
+- **F01/F06読取:** WSL systemd設定true、docker/containerdともenabled/active。Windows ScheduledTaskのActionでwslを直接呼ぶものは0件。他の起動経路は未照合なので自動起動不在と断定しない。実Windows再起動→復帰は未受入。容量はローカルで確認、公開Currentへ実機詳細は転載しない。
+- **成果の評価:** PR #15は直接再利用。既存Core/Storage/認証・既存PC修正は維持。Bot API/spool/Worker・P015関連は既存資産として保持しF05へ後置、pendingデータを削除/送信しない。Cloudflare/VPNは必要用途の段階で評価。Bot/TGS必須経路の優先誤記だけを今訂正し、撤去のためのCore再buildを行わない。
+- **残務（F別）:** F01=Windows起動復帰/依存・資源実測。F02=今回probeのPC実起動・共存/停止・復旧、実アプリ機能は各app所有。F03=USB断/認可外/容量・大容量/復旧の残Gate。F04=既存KB/MVS/Current/検索・受領rollback実統合。F05=ログ運用契約・切断spool・暗号backup取得/復号/隔離復元。F06=起動/監視/資源/回復。F07=変更責務・逆引き更新済、実運用証拠は継続。F08=GitHub遮断・障害/復元を含む全受入。番号/46タスク/最終要件は維持。
+- **Rollback:** 本作業はCore未配備。app設定更新のrollbackは前Compose/ローカルimageへ戻し同じnameでstart、volume保持。schema変更はアプリ側backup/復元契約が必要。probeの設定rollbackは同imageの再作成試験であり、異image/DB移行の証明ではない。
+- **Exact Next:** 本人の既存WSLターミナルで `cd /mnt/g/Project/Gserver/repository && bash scripts/smoke_gserver_apps_host.sh`。この1回のforeground実行内で20重点テスト→sudo本人認証→2アプリprobe→cleanup/既存状態照合を行う。全PASSでF02基盤のその範囲のみ実機受入。Windows設定/再起動/外部サービス変更は未実施。F01〜F08全体完成とはしない。
+
+---
+
+# Current priority (2026-10-30 JST) — Gserver is a generic PC server, not a Telegram product
+
+**Master's latest scope:** Gserver on the user's Windows 11 / WSL Ubuntu PC provides Docker/Compose, independent app lifecycle, local API, G: Storage, safety/recovery and optional secure network egress. Telegram Bot and Tumblr are separate app projects, not Gserver Core features. TGserver is for logs/backup as an optional separate service, not a Bot runtime prerequisite. Never change the existing shared Webhook Gateway internals without Master's explicit service-owner instruction. Do not change Contabo/Astera or Astera-owned domains for Gserver. VPN is a design option to improve source-IP privacy, not a blanket requirement that blocks locally usable server functions.
+
+**Observed PC runtime (Master's terminal, 2026-10-30):** existing immutable gace-gserver-gserver-1 container healthy, 127.0.0.1:18765/health HTTP 200; G: mounted; Owner auth configured; authenticated /ready and /files HTTP 200. This is proof of existing local Core and Storage availability, not Windows reboot recovery, general app launch, remote ingress, backup restoration, or all F01-F08 acceptance. Preserve the running release, G:/F: originals, Docker volumes and pending Bot SQLite events.
+
+**Next immediate development:** complete the generic app Compose lifecycle independently of Core, validate one real app-owned Compose config on the PC, check Windows-side access and reboot startup separately without installing unapproved scheduled tasks, then close only those acceptance gates supported by real evidence. The new local-only app manager is scripts/gserver_apps.py; its isolated source/tests are in PR #15 and must not be represented as deployed. App start uses local images only and disallows privileged/host/public/external resources by default. No new Bot, gateway/TGserver route or Cloudflare dependency is required for normal local app hosting. KB/F04 and future commercial features remain deferred, not deleted.
+
+**Source/CI/Runtime distinction:** On branch chat/gserver-generic-app-runtime-20261030, new app controller and eight offline unit tests passed in the isolated CHAT test container. The user's PC has not yet fetched or executed that branch, and no genuine app was started/stopped by this change. Existing PC runtime remains the earlier verified immutable image. Do not pull/reset the user's existing local non-main working branch or overwrite Docker runtime merely to pick up this code.
+
+---
+## Historical evidence (superseded priorities below)
+
+## 2026-10-28 Codex / Bot PC受入・二分割の適用
+
+- **Owner / Source:** Issue #9 comment 6465378786を適用。作業branch `codex/bot-pc-acceptance-20261028`。GPT CHAT修正HEAD `6dbc0d5238b1eeeb4d0524f2c2c58f5acefbe8ef`をclean checkoutへfast-forward統合。Codexは `app/tgs_bridge.py` / `tests/test_tgs_bridge.py` を編集していない（修正branchとの差分0）。Codex修正commit `6d6b9dc`。
+- **修正:** Docker contextが必須importの `kb_source.py` / `tgs_bridge.py` を除外していたため、明示allowlistへ追加。既存KB機能の開発再開ではなくアプリ起動依存の修復。Owner認証ファイル設定を全Compose profileへ共通化しstorage profileの重複注入を除去。受入スクリプトはsudo拒否を `DOCKER_SUDO_AUTH_REQUIRED` と秘匿診断し、Bot検証失敗時には旧image/access/storageへ復帰（初回は停止、volume保持）。
+- **実行可能な受入:** `scripts/bot_acceptance.py` を `gserver_bot_ready.py --install` に接続。実loopback 18765のBot/Owner認証分離、202→duplicate→409、実image/module SHA照合、SQLite該当行のfingerprint/payload保持、既存Gserverだけstop/start後のduplicate/409を検証。秘密はprocess内のみ、proxyを使わない。合成correlation IDのみ出力。これらのDocker実行は未達。
+- **Local verification:** このWSLでbridge16、runtime41、deploy contract4、新acceptance8、計69 tests PASS。新8件には許可済みDocker contextだけを一時再現した実import、全profileのOwner設定、sudo診断秘匿、停止失敗時のstart試行、再起動後replay消失の拒否、受入失敗時rollbackを含む。Controller/Docker境界のmockは実機Docker PASSと区別。Compose isolated/loopback/storage 3構成config PASS、git diff --check PASS。CI=NOT_RUN。
+- **PC Runtime (実測):** `python3 scripts/gserver_bot_ready.py --install`を実行し、tests後Docker preflightでexit1。修正後診断=`DOCKER_SUDO_AUTH_REQUIRED`。Docker build/activation/Bot restartへ到達していない。既存loopback `/health` HTTP200、`/bot/queue` HTTP404でBot新版の受入は未完了。旧ローカルrelease recordにはimageがあるがdaemonによるimage再照合は未実施。既存Podman/Redis/site_total/btpanelはactive。docker/containerdの各store空き2GiB以上をread-only確認。既存原本・サービス設定・VPSは無変更。
+- **Gateway / TGserver / Telegram:** Gateway正本Internal Event APIとTGserver ZERO integrationを読戻し。P015/G002はsource登録済みという契約を確認。private Gateway設定/到達性/202、P015 live topic audit、TGserver配送、Telegram raw、中央Reader検索相関はいずれもNOT_VERIFIED。Source文書はLive証拠ではない。資格情報を別Projectから流用せず、VPS deploy/Topic作成/新Reader/新Workflowは実行していない。
+- **Rollback / Exact Next:** sudo本人認証の境界を解消し、既存WSL checkoutで `sudo -v && python3 scripts/gserver_bot_ready.py --install` をforeground実行。端末別sudo cacheなら同じ端末で行う（パスワードをチャットへ渡さない）。成功後に既存private Gatewayの正規設定・接続確認→P015 live state read-only audit→同一event IDのGateway受領/TGS/raw/中央検索→停止再送の実証。VPS変更が必要なら既存Owner権限へ戻す。F01-F08は未完了。追加AI・定期タスクなし。
+
 # CURRENT｜G-ACEserver
 ## 2026-10-28 Master優先変更：KB停止、GserverをTG Bot受け皿+既存TGserver ZEROへ最速実装
 
