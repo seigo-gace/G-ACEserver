@@ -80,3 +80,52 @@ class SmokeTests(unittest.TestCase):
         args = docker.call_args.args
         self.assertEqual(args[:2], ('exec', smoke.CORE))
         self.assertIn("os.environ['GSERVER_AUTH_FILE']", args[-1])
+
+    def test_runtime_error_survives_missing_process_logs(self):
+        started = False
+        project = ''
+        def docker(*args):
+            nonlocal project
+            if args[:2] == ('inspect', smoke.CORE):
+                return json.dumps([{'State': {'Health': {'Status': 'healthy'}}, 'Image': 'sha256:'+'1'*64}])
+            if args[:1] == ('ps',):
+                project = args[-1].rsplit('=',1)[1]
+                return 'probe-id' if started else ''
+            if args[:2] == ('inspect', 'probe-id'):
+                return json.dumps([{'Config': {'Labels': {'com.docker.compose.project': project}},
+                    'State': {'ExitCode': 128, 'OOMKilled': False,
+                              'Error': 'OCI runtime create failed: mount /home/private-user/mount: invalid argument'}}])
+            if args[:1] == ('logs',):
+                raise smoke.apps.AppError('DOCKER_COMMAND_FAILED')
+            return ''
+        def run(cmd, **kwargs):
+            nonlocal started
+            if 'config' in cmd:
+                return json.dumps({'services': {'probe': {'image': 'local'}}})
+            if 'up' in cmd:
+                started = True
+                raise smoke.apps.AppError('DOCKER_COMMAND_FAILED', diagnostic='OCI runtime create failed')
+            return ''
+        with mock.patch.object(smoke, 'save_diagnostic', return_value=True) as save:
+            code, output = self.run_probe(docker, run)
+        self.assertEqual(code, 1)
+        self.assertIn('PROBE_RUNTIME_ERROR=OCI runtime create failed', output)
+        self.assertIn('PROBE_PRIVATE_DIAGNOSTIC=SAVED', output)
+        self.assertNotIn('/home/private-user', output)
+        self.assertIn('invalid argument', save.call_args.args[0]['containers'][0]['runtime_error'])
+
+    def test_private_error_receipt_is_owner_only(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(smoke.Path, 'home', return_value=Path(directory)):
+                self.assertTrue(smoke.save_diagnostic({'runtime_error': 'synthetic'}))
+            file = Path(directory)/'.local/state/gserver/verification/app-smoke-error.json'
+            self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(file.read_text())['runtime_error'], 'synthetic')
+
+    def test_rendered_error_hides_paths_addresses_and_opaque_values(self):
+        message = 'OCI error /home/user/private 192.0.2.1 https://example.test/private ' + 'x'*64
+        safe = smoke.safe_runtime_error(message)
+        self.assertIn('OCI error', safe)
+        for value in ('/home/user', '192.0.2.1', 'https://example', 'x'*64):
+            self.assertNotIn(value, safe)
