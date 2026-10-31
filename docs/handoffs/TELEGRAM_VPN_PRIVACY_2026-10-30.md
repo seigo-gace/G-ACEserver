@@ -206,3 +206,13 @@ Gserver owner-only原本Tokenをcontrollerで検証し、既存sudoの短命help
 根拠: https://github.com/cloudflare/cloudflared/blob/master/Dockerfile 、 https://developers.cloudflare.com/tunnel/reference/run-parameters/ 。最新Sourceは取得済みlocal digestの実証を代替せず、local検証と実CF接続も分離する。
 
 R18補強: 元のcontainer tmpfs意図を維持し、Token stagingを新たな平文disk copyにしない。CFを含む実行bundleはHost tmpfs上のprivate directoryを使う。helperは開いたdirectory FDをfindmntで照合しtmpfs以外へは書かない。Compose secrets読込前にfileを準備し、guard/app確認後だけconnectorを起動する。オフライン監査は/dev/shm内のprivate temporary directoryと合成値を使い、同じCompose secrets方式で読取を検証する。
+
+### R19 / Windows既存origin certificateによる限定read-only Tunnel照会
+
+R18のlocal image/合成secret実機監査はMaster返却PASS。Windows標準cloudflared directoryに既存local-managed credential JSONとorigin certificateを発見し、同一accountを値非表示で照合した。Windows常駐serviceは0件、標準config YAMLはない。これはProvider上のTunnelが未使用という証拠ではない。
+
+既存wrapperの明示read-only discoveryで、現在のWindows user profileの標準certificateだけを使う。Windows ACLのowner/read boundaryとファイルhashを照合し、WSLで読む内容が同じことを検証する。証明書とlocal credentialのaccountが一致する対象だけを照会対象にする。account-wide certificateを永続複製せず、R18の固定filename/owner/tmpfs/UID0400 helperをorigin-certという限定種別に拡張し、JP VPN内の公式cloudflared `tunnel list --output json`だけへread-only mountする。
+
+実行順はJP正規通信/guard確認→限定CLI照会→reader終了→JP Kill Switch/cleanup/Core不変→秘密を含まない対象metadataのprivate receipt保存。原本証明書やWindows ACLを変更せず、新Token、generic Account API helper、共有broker代替、DNS/Access/Tunnelの変更・run・削除・replica参加を実装しない。既存local credentialと一致しない他Projectのmetadataは保存/表示しない。stdoutは件数/状態だけとし、ID/名前/zoneや原本pathはowner-only receiptに限定。Tunnel用途/zone所有はUNKNOWNのまま、一覧照会成功をTunnel E2Eや利用許可へ昇格しない。
+
+証明書は管理権限を持つため、clientのCLI動詞はlistに固定する。共有cf-account-api契約と区別し、共有Account API利用は既存の正式brokerが確認できるまで保留する。Contabo不使用。根拠: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/tunnel-permissions/ 。
