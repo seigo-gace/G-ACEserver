@@ -199,10 +199,10 @@ class BotSpool:
             conn.execute("BEGIN IMMEDIATE")
             # Only the current lease generation may finish an event. A late
             # ACK from a previous attempt must not overwrite its successor.
-            conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? "
-                         "WHERE id=? AND state='sending' AND attempts=?",
-                         (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
-                          status if state != "blocked" else "requires_operator", key, attempts))
+            changed = conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? "
+                                   "WHERE id=? AND state='sending' AND attempts=?",
+                                   (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
+                                    status if state != "blocked" else "requires_operator", key, attempts)).rowcount
             # Retain successful receipts for 7 days to deduplicate replays.
             conn.execute("DELETE FROM events WHERE state='sent' AND sent_at<?", (now - 7 * 86400,))
             # A bounded retention window is necessary on a small owner PC.
@@ -210,6 +210,7 @@ class BotSpool:
                 SELECT id FROM events WHERE state='sent'
                 ORDER BY sent_at DESC,id DESC LIMIT -1 OFFSET ?
             )""", (MAX_SENT_RECEIPTS,))
+            return changed == 1
 
 
 def gateway_endpoint(url):
@@ -341,6 +342,8 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
         # Do not validate delivery outcomes against the metric dictionary.
         if result not in ("ack", "retry", "blocked"):
             result = "retry"
-        spool.finish(key, result, attempts)
-        done["sent" if result == "ack" else result] += 1
+        # A timed-out worker can finish after another worker has reclaimed
+        # this event. Never report a stale ACK as a durable spool transition.
+        if spool.finish(key, result, attempts):
+            done["sent" if result == "ack" else result] += 1
     return done
