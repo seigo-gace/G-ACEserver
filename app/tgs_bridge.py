@@ -92,8 +92,18 @@ def secure_dir(path):
         raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
     if not path.exists():
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if path.is_symlink():
-        raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
+    # An existing spool directory must never expose operational events or
+    # its SQLite WAL through other users' directory traversal permissions.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        raise BotEventError("SPOOL_DIRECTORY_UNSAFE") from None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
+    finally:
+        os.close(fd)
     return path
 
 
