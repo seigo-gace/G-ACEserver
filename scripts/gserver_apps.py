@@ -104,6 +104,16 @@ def validate(file, name):
             raise AppError("COMPOSE_SERVICE_INVALID")
         if svc.get("build"):
             raise AppError("BUILD_NOT_ALLOWED")
+        logging = svc.get("logging", {}) or {}
+        if logging.get("driver") == "local":
+            try:
+                options = logging.get("options", {}) or {}
+                count = int(options.get("max-file", "5"))
+                compress = str(options.get("compress", "true")).lower()
+                if count < 1 or compress not in ("true", "false") or (count == 1 and compress == "true"):
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise AppError("LOCAL_LOG_ROTATION_INVALID") from exc
         if svc.get("container_name") or svc.get("volumes_from") or svc.get("userns_mode") == "host":
             raise AppError("CROSS_PROJECT_CONTAINER_NOT_ALLOWED")
         if svc.get("privileged") or svc.get("pid") == "host" or svc.get("ipc") == "host":
@@ -162,6 +172,10 @@ def operate(action, root, services, name, show_logs=False):
     elif action == "stop":
         run(root + ["stop", "--timeout", "10"])
         print("APP_STOP=PASS")
+    elif action == "restart":
+        run(root + ["restart", "--no-deps", "--timeout", "10"], timeout=120)
+        run(root + ["up", "-d", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "60"], timeout=180)
+        print("APP_RESTART=PASS")
     elif action == "status":
         stdout = run(root + ["ps", "--all", "--format", "json"])
         try:
@@ -190,7 +204,7 @@ def operate(action, root, services, name, show_logs=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("verify", "start", "stop", "status", "logs"))
+    parser.add_argument("action", choices=("verify", "start", "stop", "restart", "status", "logs"))
     parser.add_argument("name", help="App label: lowercase letters, digits, and dashes")
     parser.add_argument("compose", help="Existing Compose YAML path (app-owned)")
     parser.add_argument("--show-logs", action="store_true", help="Display app log contents locally (may contain private data)")

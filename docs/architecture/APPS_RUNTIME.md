@@ -13,9 +13,10 @@ python3 -B scripts/gserver_apps.py start my-app /absolute/app/compose.yaml
 python3 -B scripts/gserver_apps.py status my-app /absolute/app/compose.yaml
 python3 -B scripts/gserver_apps.py logs my-app /absolute/app/compose.yaml --show-logs
 python3 -B scripts/gserver_apps.py stop my-app /absolute/app/compose.yaml
+python3 -B scripts/gserver_apps.py restart my-app /absolute/app/compose.yaml
 ```
 
-`start` waits up to 60 seconds for readiness (healthcheck when supplied). Repeating `start` applies changed configuration. For rollback, retain the previous app Compose/config and immutable local image, restore the previous definition, then `start` with the same app name. Persistent app volumes are retained. Image/config rollback does not undo a database migration: back up the app's data using its own compatible procedure before schema changes. A failed `start` retains containers/data for `status`/`logs` and recovery; it does not report successful deployment or automatically discard data.
+`start` waits up to 60 seconds for readiness (healthcheck when supplied). `restart` recycles running containers without `compose down`, then waits again for readiness. Repeating `start` applies changed configuration. For rollback, retain the previous app Compose/config and immutable local image, restore the previous definition, then `start` with the same app name. Persistent app volumes are retained. Image/config rollback does not undo a database migration: back up the app's data using its own compatible procedure before schema changes. A failed `start` retains containers/data for `status`/`logs` and recovery; it does not report successful deployment or automatically discard data.
 
 Use unique lowercase names. Project `gace-app-<name>` isolates each app from `gace-gserver`. Default named networks/volumes stay within that project; explicit cross-project names, external resources, volume/network driver overrides, privilege/host namespaces, lifecycle hooks and Docker API socket exposure are refused. Bind mounts and secret/config files must resolve inside the app Compose directory; missing paths are refused. G:/F: originals are not mounted by the manager. Use app-owned named volumes for persistent container data. A separately authorized shared-data contract can be added later when an actual app needs it.
 
