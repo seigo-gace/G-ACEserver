@@ -1,3 +1,12 @@
+# 2026-10-31 Codex｜JP→KR順次実機PASS・Cloudflareへ継続
+
+- **Master実機 / Source2822b2f:** wrapper86 tests PASS。JPは実HTTPS/JP出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。JP内でKR candidateを取得しJP cleanup・不変確認後にprivate pinを保存、KRを新namespaceで起動。KRも実HTTPS/KR出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。両方VERIFY=PASS/ERROR=NONE/exit0。実IP/鍵/hostnameは公開しない。
+- **範囲:** Handshake timestamp NOT_COLLECTED。JP0.562/0.586秒・KR0.609/0.837秒は少数HTTPSサンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN、常時運用/自動切替/復旧/媒体/Vault/F01〜F08は別の未完了Gate。
+- **Cloudflare調査:** server-coreのCloudflare/Shared Secret契約を取得。既定cloudflared設定とCursor MCP設定、ローカルbroker認証経路なし。ローカル契約portは待受なし。既存Gserver settingsにはCloudflare関連keyなし。Account brokerとTunnel credentialは別契約。Contaboへ接続せず、Astera/共有Providerも不変更。Masterへ既存設定の所在を照会中（値の貼付は不要）。
+- **次の独立Source作業:** R18のnative token-file/DNS構成に修正し、資格情報なし・network noneのlocal image検証を準備。所有zone/Tunnel/Accessと正式利用経路が分かるまでProvider操作や実Tunnel参加はしない。
+
+---
+
 # 2026-10-31 Codex｜JP出口の実機受入PASS・KRへ継続
 
 - **Master実機 / Source 0b970cb:** wrapper74 tests PASS。APP_RESOLV_CONF_APPLIED、APP_DNS_VPN_NAMESERVER、実HTTPS/名前解決、日本出口JP、kernel WireGuard通信、Docker DNS UDP/TCP drop、IPv6無効化/public接続拒否、VPN停止後public TCP Kill Switch、Core/Storage/他container不変のすべてPASS。ACCEPTANCE_LIVE_VPN=PASS、VERIFY=PASS、ERROR=NONE、exit0。これは隔離JP試験の範囲に限定した受入。

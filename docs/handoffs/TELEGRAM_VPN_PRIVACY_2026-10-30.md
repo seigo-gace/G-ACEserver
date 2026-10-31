@@ -194,3 +194,13 @@ Master実機でR15/R16修正後のJP実通信・DNS/IPv6遮断・Kill Switch・C
 明示flag付きJP試験で、正当なJP通信・guardを確認した後だけ、KR private profileのEndpoint名をUID65534 app内のVPN resolverからIPv4解決する。Host側DNS/DoHへのfallback禁止。結果は1〜16個のpublic IPv4だけを受け入れ、決定的に1個を選ぶ。既存KR pinがあれば変更/再解決しない。IP/hostname/鍵をログやGitへ出さない。DNS候補はWireGuard peer鍵と実KR出口検証を代替しない。
 
 取得候補はメモリに置き、JPのKill Switch・cleanup・Core/Storage不変が全部成功してから、profile hash/既存pin競合を再確認しowner-only既存cacheへ保存する。途中失敗では新pinを保存せずKRも起動しない。JP cleanup後だけ新しいKR namespaceをguard付きで作り、同じ安全GateをKR単独で検証する。同時profile使用を防ぐため、試験開始時に既存gace-vpn namespace利用containerが稼働していれば停止/採用せず拒否する。自動failover/常時運用の復旧完了とはしない。
+
+### R18 / Cloudflare connectorのshell依存・Token argvを除去（2026-10-31）
+
+JP→KR順次の隔離実機受入はMaster返却でPASS。Cloudflareは未実行。公式cloudflared Dockerfileはdistroless/nonrootであり、現行scaffoldの/bin/sh待機/exec注入は成立を保証できず、--token実値argvも秘密保護と不整合。公式native `tunnel run --token-file`へ移す（2025.4.0以降）。connectorへもVPN DNS専用resolv.confをread-only適用する。
+
+Gserver owner-only原本Tokenをcontrollerで検証し、既存sudoの短命helperがowner一致/0700のbundle directory FD内の固定新規fileへstdinから供給する。O_EXCL/O_NOFOLLOW、0400、container UID65534専用を必須とし、既存fileを上書きしない。Docker Compose secrets.fileをread-onlyで当該connectorだけへmountする。Host側親directory0700を維持し、元Token0600を緩めない。実値はenv/argv/Compose/ログへ出さない。新Vault/新Token/常駐サービスは作らない。VPN guardとapp DNS確認が済んでからconnectorを起動する。
+
+事前local image検証は固定済みlocal digestのみ、network none・cap_drop ALL・非root・read_only・資源制限・no pullでversion/helpを取得し、native token-file対応を確認する。credential/既存Tunnelを投入せず外部接続しない。実Tunnel/Accessは所有zone、正式credential経路、既存設定/利用者/rollbackを照合後の別Gate。Account broker未確認を新Token作成やContabo接続で迂回しない。
+
+根拠: https://github.com/cloudflare/cloudflared/blob/master/Dockerfile 、 https://developers.cloudflare.com/tunnel/reference/run-parameters/ 。最新Sourceは取得済みlocal digestの実証を代替せず、local検証と実CF接続も分離する。
