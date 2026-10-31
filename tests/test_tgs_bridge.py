@@ -29,6 +29,15 @@ class TgsBridgeTests(unittest.TestCase):
         self.folder = Path(tmp.name)
         self.queue = BotSpool(self.folder / "queue")
 
+    def test_existing_public_spool_directory_is_refused(self):
+        public = self.folder / "public-queue"
+        public.mkdir(mode=0o755)
+        with self.assertRaisesRegex(BotEventError, "SPOOL_DIRECTORY_UNSAFE"):
+            BotSpool(public)
+        self.assertFalse((public / "bot-events.sqlite3").exists())
+        public.chmod(0o700)
+        self.assertEqual(BotSpool(public).counts()["pending"], 0)
+
     def test_only_bounded_operational_fields_accepted(self):
         for payload in (
             dict(sample(), text="private telegram message"),
