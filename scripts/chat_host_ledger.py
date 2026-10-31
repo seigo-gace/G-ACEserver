@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import sqlite3
 import re
-import stat
 
 class ReplayDenied(ValueError):
     pass
@@ -39,6 +38,17 @@ class RequestLedger:
             raise ReplayDenied("LEDGER_FILE_INVALID")
         if path.exists() and path.stat().st_mode & 0o077:
             raise ReplayDenied("LEDGER_PERMISSIONS_INVALID")
+        if not path.exists():
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                os.close(fd)
+            except FileExistsError:
+                pass  # Concurrent creator; re-check metadata below.
+            except OSError as exc:
+                raise ReplayDenied("LEDGER_UNAVAILABLE") from exc
+        meta = path.lstat()
+        if not path.is_file() or meta.st_uid != os.geteuid() or meta.st_nlink != 1 or meta.st_mode & 0o077:
+            raise ReplayDenied("LEDGER_FILE_INVALID")
         try:
             with sqlite3.connect(path, timeout=2, isolation_level=None) as db:
                 db.execute("PRAGMA synchronous=FULL")
