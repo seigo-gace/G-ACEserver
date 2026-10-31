@@ -13,7 +13,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from tgs_bridge import (BotSpool, BotEventError, DESTINATION, PROJECT_ID, MAX_ATTEMPTS,
                         _NoGatewayRedirect, gateway_endpoint, envelope, flush_once,
-                        send_gateway, validate)
+                        send_gateway, gateway_token, validate)
 
 
 def sample():
@@ -114,6 +114,19 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(self.queue.counts()["blocked"], 0)
         sent = flush_once(self.queue, "https://gateway.example", "token", sender=lambda *_: "ack")
         self.assertEqual(sent["sent"], 1)
+
+    def test_gateway_token_requires_private_regular_file(self):
+        secret = self.folder / "gateway-token"
+        secret.write_bytes(b"T" * 32)
+        secret.chmod(0o644)
+        with self.assertRaisesRegex(BotEventError, "GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE"):
+            gateway_token(secret)
+        secret.chmod(0o600)
+        self.assertEqual(gateway_token(secret), "T" * 32)
+        link = self.folder / "gateway-token-link"
+        link.symlink_to(secret)
+        with self.assertRaisesRegex(BotEventError, "GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE"):
+            gateway_token(link)
 
     def test_wrong_gateway_url_rejected(self):
         for url in ("http://gateway.example", "https://user:pass@gateway.example",
