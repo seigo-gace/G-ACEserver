@@ -174,6 +174,10 @@ def operate(action, root, services, name, show_logs=False):
     elif action == "stop":
         run(root + ["stop", "--timeout", "10"])
         print("APP_STOP=PASS")
+    elif action == "restart":
+        run(root + ["restart", "--no-deps", "--timeout", "10"], timeout=120)
+        run(root + ["up", "-d", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "60"], timeout=180)
+        print("APP_RESTART=PASS")
     elif action == "status":
         stdout = run(root + ["ps", "--all", "--format", "json"])
         try:
@@ -202,7 +206,7 @@ def operate(action, root, services, name, show_logs=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("verify", "start", "stop", "status", "logs"))
+    parser.add_argument("action", choices=("verify", "start", "stop", "restart", "status", "logs"))
     parser.add_argument("name", help="App label: lowercase letters, digits, and dashes")
     parser.add_argument("compose", help="Existing Compose YAML path (app-owned)")
     parser.add_argument("--show-logs", action="store_true", help="Display app log contents locally (may contain private data)")
