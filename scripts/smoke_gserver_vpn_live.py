@@ -80,20 +80,30 @@ def tcp_connected(container, address, port, *, ipv6=False):
 
 
 def wireguard_state(container):
-    # Never use dump/showconf/private-key: those include secret material.
-    handshakes = docker('exec', container, 'wg', 'show', 'tun0', 'latest-handshakes').splitlines()
-    transfers = docker('exec', container, 'wg', 'show', 'tun0', 'transfer').splitlines()
+    # Existing Host iproute2 reads only kernel link type/counters through the pinned
+    # namespace helper. Gluetun does not ship wg; never read secret-bearing dumps.
+    before = json.loads(docker('inspect', container))[0]['State']
+    pid = before.get('Pid')
+    if not before.get('Running') or type(pid) is not int or pid <= 1:
+        raise vpn.VPNError('VPN_NAMESPACE_INVALID')
+    report = vpn.namespace_guard(pid, link=True)
+    after = json.loads(docker('inspect', container))[0]['State']
+    if not after.get('Running') or after.get('Pid') != pid:
+        raise vpn.VPNError('VPN_NAMESPACE_CHANGED')
     try:
-        if len(handshakes) != 1 or len(transfers) != 1:
+        links = report['link']
+        if not isinstance(links, list) or len(links) != 1:
             raise ValueError()
-        peer, stamp = handshakes[0].split()
-        other, rx, tx = transfers[0].split()
-        stamp, rx, tx = int(stamp), int(rx), int(tx)
-        if peer != other or not 0 <= time.time() - stamp <= 180 or min(rx, tx) < 0:
+        link = links[0]
+        if link['ifname'] != 'tun0' or link['linkinfo']['info_kind'] != 'wireguard' or 'UP' not in link['flags']:
             raise ValueError()
-    except (ValueError, TypeError) as exc:
-        raise vpn.VPNError('WIREGUARD_HANDSHAKE_OR_COUNTER_INVALID') from exc
-    return peer, rx, tx
+        index = link['ifindex']
+        rx, tx = (link['stats64'][direction]['bytes'] for direction in ('rx', 'tx'))
+        if type(index) is not int or index <= 0 or any(type(v) is not int or v < 0 for v in (rx, tx)):
+            raise ValueError()
+        return (report['inode'], index), rx, tx
+    except (ValueError, TypeError, KeyError) as exc:
+        raise vpn.VPNError('WIREGUARD_KERNEL_TELEMETRY_INVALID') from exc
 
 
 def app_guard(container):
@@ -269,6 +279,8 @@ def main():
             print('VPN_HTTPS_LATENCY_SAMPLES_SEC=' + ','.join(latencies), flush=True)
             print('APP_HTTPS_LITERAL_AND_DNS=PASS', flush=True)
             print('VPN_EXIT_COUNTRY=' + region.upper(), flush=True)
+            print('WIREGUARD_KERNEL_TRAFFIC=PASS', flush=True)
+            print('WIREGUARD_HANDSHAKE_TIMESTAMP=NOT_COLLECTED', flush=True)
             print('WIREGUARD_CONNECTION=PASS', flush=True)
             print('WAN_PACKETS=SENT_VIA_VPN_NAMESPACE', flush=True)
             phase = 'NET_GUARDS'

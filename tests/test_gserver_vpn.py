@@ -291,6 +291,21 @@ class VPNTests(unittest.TestCase):
             self.assertEqual(call.kwargs['pass_fds'],(9,))
         close.assert_called_once_with(9)
 
+    def test_privileged_link_reader_pins_fd_and_uses_no_wg_or_secret_query(self):
+        import sys
+        replies=[types.SimpleNamespace(stdout='{"nftables":[]}'),types.SimpleNamespace(stdout='[{"ifname":"tun0"}]')]
+        with mock.patch.object(sys,'argv',['helper','link','42']), \
+             mock.patch('os.open',return_value=9), mock.patch('os.fstat',return_value=types.SimpleNamespace(st_ino=2)), \
+             mock.patch('os.stat',return_value=types.SimpleNamespace(st_ino=1)), mock.patch('os.close') as close, \
+             mock.patch('subprocess.run',side_effect=replies) as runner, contextlib.redirect_stdout(io.StringIO()) as output:
+            exec(vpn.NAMESPACE_HELPER,{})
+        self.assertEqual(json.loads(output.getvalue())['link'],[{'ifname':'tun0'}])
+        self.assertEqual(runner.call_count,2)
+        command=runner.call_args.args[0]
+        self.assertEqual(command,['nsenter','--net=/proc/self/fd/9','ip','-j','-d','-s','link','show','dev','tun0'])
+        self.assertEqual(runner.call_args.kwargs['pass_fds'],(9,))
+        close.assert_called_once_with(9)
+
     def test_policy_fingerprint_ignores_only_counters_and_handles(self):
         a={'nft':{'nftables':[{'rule':{'handle':1,'expr':[{'counter':{'packets':0,'bytes':0}},{'drop':None}]}}]}}
         b={'nft':{'nftables':[{'rule':{'handle':2,'expr':[{'counter':{'packets':5,'bytes':100}},{'drop':None}]}}]}}

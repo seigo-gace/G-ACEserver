@@ -57,7 +57,7 @@ import json,os,subprocess,sys
 fd=None
 try:
  mode,pid=sys.argv[1],int(sys.argv[2])
- if mode not in ('install','inspect') or pid<=1:
+ if mode not in ('install','inspect','link') or pid<=1:
   raise ValueError('INVALID_NAMESPACE_REQUEST')
  fd=os.open('/proc/'+str(pid)+'/ns/net',os.O_RDONLY)
  inode=os.fstat(fd).st_ino
@@ -67,12 +67,16 @@ try:
  if mode=='install':
   subprocess.run(command+['-f',sys.argv[3]],pass_fds=(fd,),check=True,capture_output=True,text=True,timeout=20)
  result=subprocess.run(command+['-j','list','table','inet','gserver_privacy'],pass_fds=(fd,),check=True,capture_output=True,text=True,timeout=20)
- print(json.dumps({'ok':True,'inode':inode,'nft':json.loads(result.stdout)}))
+ report={'ok':True,'inode':inode,'nft':json.loads(result.stdout)}
+ if mode=='link':
+  result=subprocess.run(['nsenter','--net=/proc/self/fd/'+str(fd),'ip','-j','-d','-s','link','show','dev','tun0'],pass_fds=(fd,),check=True,capture_output=True,text=True,timeout=20)
+  report['link']=json.loads(result.stdout)
+ print(json.dumps(report))
 except (OSError,ValueError,subprocess.CalledProcessError,subprocess.TimeoutExpired) as exc:
  code='HOST_NAMESPACE_FORBIDDEN' if str(exc)=='HOST_NAMESPACE_FORBIDDEN' else 'NAMESPACE_GUARD_COMMAND_FAILED'
  if isinstance(exc,PermissionError):code='NAMESPACE_PERMISSION_DENIED'
  if isinstance(exc,FileNotFoundError):code='NAMESPACE_TOOL_OR_PID_MISSING'
- if isinstance(exc,subprocess.CalledProcessError):code='NFT_COMMAND_FAILED'
+ if isinstance(exc,subprocess.CalledProcessError):code='LINK_STATE_COMMAND_FAILED' if mode=='link' else 'NFT_COMMAND_FAILED'
  if isinstance(exc,subprocess.TimeoutExpired):code='NAMESPACE_COMMAND_TIMEOUT'
  diagnostic=exc.stderr if isinstance(exc,subprocess.CalledProcessError) else ''
  print(json.dumps({'ok':False,'code':code,'diagnostic':diagnostic or ''}))
@@ -530,9 +534,11 @@ def run(cmd, input=None, timeout=180, *, step=''):
     return result.stdout
 
 
-def namespace_guard(pid, rules=None):
+def namespace_guard(pid, rules=None, *, link=False):
     privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
-    mode = 'install' if rules is not None else 'inspect'
+    if link and rules is not None:
+        raise VPNError('INVALID_NAMESPACE_REQUEST')
+    mode = 'link' if link else ('install' if rules is not None else 'inspect')
     cmd = privilege + ['python3', '-c', NAMESPACE_HELPER, mode, str(pid)]
     if rules is not None:
         cmd.append(str(rules))

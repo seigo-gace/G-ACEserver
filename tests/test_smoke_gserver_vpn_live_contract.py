@@ -173,19 +173,38 @@ class RealNetworkEvidence(unittest.TestCase):
         with mock.patch.object(live,'docker',side_effect=live.apps.AppError('DOCKER_COMMAND_FAILED')):
             with self.assertRaises(live.apps.AppError): live.app_json('app','probe')
 
-    def test_recent_handshake_and_transfer_are_required_without_dump(self):
-        with mock.patch.object(live.time,'time',return_value=1000):
-            for handshake,transfer,accepted in (
-                ('peer 990','peer 10 20',True),('peer 0','peer 10 20',False),
-                ('peer 990','other 10 20',False),('peer 990','peer -1 20',False),
-                ('peer 990\nother 990','peer 10 20',False),('','',False)):
-                with self.subTest(handshake=handshake), mock.patch.object(live,'docker',side_effect=[handshake,transfer]) as command:
-                    if accepted: self.assertEqual(live.wireguard_state('vpn'),('peer',10,20))
-                    else:
-                        with self.assertRaisesRegex(vpn.VPNError,'WIREGUARD_HANDSHAKE_OR_COUNTER_INVALID'):
-                            live.wireguard_state('vpn')
-                    self.assertEqual(command.call_args_list[0].args[-1],'latest-handshakes')
-                    self.assertEqual(command.call_args_list[1].args[-1],'transfer')
+    def test_kernel_wireguard_identity_and_counters_are_required(self):
+        import copy,json
+        valid={'inode':10,'link':[{'ifname':'tun0','ifindex':7,'flags':['UP'],
+               'linkinfo':{'info_kind':'wireguard'},'stats64':{'rx':{'bytes':10},'tx':{'bytes':20}}}]}
+        changes=[None,'tun','missing','negative','boolean','down','duplicate']
+        for change in changes:
+            report=copy.deepcopy(valid)
+            link=report['link'][0]
+            if change=='tun': link['linkinfo']['info_kind']='tun'
+            if change=='missing': del link['stats64']
+            if change=='negative': link['stats64']['rx']['bytes']=-1
+            if change=='boolean': link['stats64']['rx']['bytes']=True
+            if change=='down': link['flags']=[]
+            if change=='duplicate': report['link']*=2
+            with self.subTest(change=change), \
+                 mock.patch.object(live,'docker',return_value=json.dumps([{'State':{'Running':True,'Pid':1234}}])) as command, \
+                 mock.patch.object(live.vpn,'namespace_guard',return_value=report) as guard:
+                if change is None:
+                    self.assertEqual(live.wireguard_state('vpn'),((10,7),10,20))
+                else:
+                    with self.assertRaisesRegex(vpn.VPNError,'WIREGUARD_KERNEL_TELEMETRY_INVALID'):
+                        live.wireguard_state('vpn')
+                guard.assert_called_once_with(1234,link=True)
+                self.assertTrue(all(c.args==('inspect','vpn') for c in command.call_args_list))
+
+    def test_kernel_telemetry_rejects_container_restart(self):
+        import json
+        states=[json.dumps([{'State':{'Running':True,'Pid':pid}}]) for pid in (1234,5678)]
+        with mock.patch.object(live,'docker',side_effect=states), \
+             mock.patch.object(live.vpn,'namespace_guard',return_value={'inode':10}):
+            with self.assertRaisesRegex(vpn.VPNError,'VPN_NAMESPACE_CHANGED'):
+                live.wireguard_state('vpn')
 
     def report(self,udp=0,tcp=0,inode=10):
         return {'inode':inode,'nft':{'nftables':[{'rule':{'comment':'gserver_dns_'+proto,

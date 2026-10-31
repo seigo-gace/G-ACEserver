@@ -73,7 +73,7 @@ Gluetun公式Sourceはrepository IDを維持して `passteque/gluetun` へ移行
 Gluetun loopback APIはアプリhealthにだけ使用し、外向き通信・Kill Switchの受入根拠にしない。R15の実測は次の範囲を対象とする。
 
 - UID65534 appから固定public IPv4 HTTPSと名前付きHTTPSを実行。標準TLS検証、環境Proxy無効、redirect拒否、本文サイズ制限を適用する。出口public IPv4・JP/KR地域一致を検査し、IP本文は表示しない。診断先はCloudflareの公式`/cdn-cgi/trace`であり、所有zone/Tunnel/Accessの操作ではない。
-- `wg show tun0 latest-handshakes` / `transfer` のみを非表示で読取。直近handshakeと試験前後の受信・送信量増加を確認する。秘密が出る`dump`/`showconf`は使用しない。
+- 既存Hostの`ip -j -d -s link show dev tun0`を、FDで固定した対象VPN namespace内だけで実行。kernel interfaceの種類がwireguard、UP、namespace inode/ifindex不変、試験前後の受信・送信量増加を確認する。Gluetunにwg CLIは同梱されていないため依存しない。Handshake時刻はNOT_COLLECTEDとして別表示し、通常tun/userspace/不明種類を合格にしない。秘密が出るdump/showconfは使用しない。
 - Docker組込DNSへのUDP/TCP試験送信が、それぞれ独立nft drop counterへ計上されることを確認する。namespace IPv6無効化とpublic IPv6宛TCP遮断を確認する。閉じたloopback portをIPv6遮断の根拠にしない。
 - 同じappからpublic IPv4 TCP到達が成功することを確認してからVPNを停止し、同じ宛先の遮断を再試験する。appが動いていること・同一namespace/guard不変も照合する。Docker exec失敗・不正なJSON・不明な試験状態はFAIL。
 

@@ -1,3 +1,12 @@
+# 2026-10-31 Codex｜DNS実機PASS・wg不在による試験修復
+
+- **Master実機（3fe4aeb）:** focused70 PASS。readinessはJP pin/profile/local immutable imagesあり、KR pinなし。`APP_RESOLV_CONF_APPLIED=PASS`・`APP_DNS_VPN_NAMESERVER=PASS`。VPN_EGRESSで `wg: executable file not found` によりFAIL。Core/Storage/他container不変PASS。VPN通信・DNS遮断・Kill Switch・Cloudflare受入へは未到達。
+- **原因/修正:** Gluetun公式v3.41.3 DockerfileとHost実在ツールを確認。wgはどちらにもなく、Host既存ip/nsenterを再利用する。R16を実装前に保存。既存のnamespace FD固定helperへ読取専用ip link詳細/統計取得を追加し、kernel wireguard種類/UP/namespace inode/ifindex不変・実HTTPS前後RX/TX増加を必須とした。通常tun/不明/欠落/不増加はFAIL。Handshake時刻はNOT_COLLECTEDとして分離。パッケージ追加・image変更・保護解除なし。
+- **Source検証:** 確定Sourceの全回帰294 tests PASS、既存wrapperと同じ重点72 tests PASS、shell構文/diff check PASS。修正後の実機結果は待機中、CIはNOT_RUN。
+- **次の実機:** `GSERVER_VPN_REGION=jp GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh"`。Codexシェルへ本人sudo認証は共有されないため、同じWSL端末で実行が必要。修正後Runtime/CIは未検証、既存Core/Storageの停止や再配置なし。受入目的はJP→KR/復旧/性能→Cloudflare統合のまま維持。F01〜F08未完了。
+
+---
+
 # 2026-10-31 Codex継続｜最新引継ぎ照合・VPN実機受入の判定修正
 
 - **正本/場所:** Rule #16、Issue #9、[最新委任](https://github.com/seigo-gace/G-ACEserver/pull/15#issuecomment-6535675565)を取得。D側既存checkout/branchのHEADとGitHub headが`ed111a3`で一致。worktreeは既存1件、stashなし。開始時の未追跡空ファイル`FETCH_HEAD`は既存物として保持。別writerの変更は検出せず、Codexがこの既存branchのVPN受入修正を担当。G旧copyは無変更。
