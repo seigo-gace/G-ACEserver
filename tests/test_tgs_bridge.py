@@ -31,7 +31,8 @@ class TgsBridgeTests(unittest.TestCase):
 
     def test_existing_public_spool_directory_is_refused(self):
         public = self.folder / "public-queue"
-        public.mkdir(mode=0o755)
+        public.mkdir()
+        public.chmod(0o755)
         with self.assertRaisesRegex(BotEventError, "SPOOL_DIRECTORY_UNSAFE"):
             BotSpool(public)
         self.assertFalse((public / "bot-events.sqlite3").exists())
