@@ -197,9 +197,12 @@ class BotSpool:
         delay = min(3600, 15 * 2 ** min(attempts, 8))
         with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? WHERE id=? AND state='sending'",
+            # Only the current lease generation may finish an event. A late
+            # ACK from a previous attempt must not overwrite its successor.
+            conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? "
+                         "WHERE id=? AND state='sending' AND attempts=?",
                          (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
-                          status if state != "blocked" else "requires_operator", key))
+                          status if state != "blocked" else "requires_operator", key, attempts))
             # Retain successful receipts for 7 days to deduplicate replays.
             conn.execute("DELETE FROM events WHERE state='sent' AND sent_at<?", (now - 7 * 86400,))
             # A bounded retention window is necessary on a small owner PC.
