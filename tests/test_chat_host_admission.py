@@ -37,4 +37,4 @@ class AdmissionTests(unittest.TestCase):
     def test_future(self): self.denied({"issued_at": (NOW + timedelta(seconds=1)).isoformat()})
     def test_expired(self): self.denied({"issued_at": (NOW - timedelta(seconds=61)).isoformat()})
     def test_naive(self): self.denied({"issued_at": "2026-10-31T12:00:00"})
-    def test_extra_field(self): self.denied({"output": "anything"})
+    def test_extra_field(self): self.denied({"output": "anything"})\n    def test_list_command(self): self.denied({"command_id": ["project.git_head"]})\n    def test_dict_command(self): self.denied({"command_id": {"id": "project.git_head"}})\n    def test_list_effect(self): self.denied({"effect": ["read_only"]})\n    def test_invalid_datetime(self): self.denied({"issued_at": "not-a-date"})\n    def test_invalid_now(self):\n        with self.assertRaises(AdmissionDenied):\n            validate_read_only_request(sample(), expected_cu=CU, expected_sha=SHA, now="now")
