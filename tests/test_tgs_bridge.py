@@ -141,6 +141,32 @@ class TgsBridgeTests(unittest.TestCase):
         self.assertEqual(first[1], second[1])
         self.assertEqual(second[2], 2)
 
+    def test_final_attempt_crash_moves_expired_sending_to_operator_recovery(self):
+        with patch("tgs_bridge.MAX_ATTEMPTS", 2):
+            self.queue.accept(sample(), now=100)
+            first = self.queue.claim(now=100)
+            self.assertEqual(first[2], 1)
+            second = self.queue.claim(now=161)
+            self.assertEqual(second[2], 2)
+            self.assertEqual(self.queue.counts()["sending"], 1)
+            self.assertIsNone(self.queue.claim(now=222))
+            self.assertEqual(self.queue.counts()["sending"], 0)
+            self.assertEqual(self.queue.counts()["blocked"], 1)
+            self.assertEqual(self.queue.retry_blocked(), 1)
+            self.assertEqual(self.queue.claim(now=223)[2], 1)
+
+    def test_stale_ack_cannot_finalize_a_newer_claim(self):
+        self.queue.accept(sample(), now=100)
+        first = self.queue.claim(now=100)
+        second = self.queue.claim(now=161)
+        self.assertEqual(second[2], first[2] + 1)
+        self.queue.finish(first[0], "ack", first[2], now=162)
+        self.assertEqual(self.queue.counts()["sending"], 1)
+        self.assertEqual(self.queue.counts()["sent"], 0)
+        self.queue.finish(second[0], "retry", second[2], now=162)
+        self.assertEqual(self.queue.counts()["sending"], 0)
+        self.assertEqual(self.queue.counts()["pending"], 1)
+
     def test_gateway_generated_receipt_id_is_accepted(self):
         class FakeResponse:
             status = 202
