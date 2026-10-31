@@ -45,6 +45,39 @@ print(json.dumps(digests))
     return result
 
 
+def safe_runtime_error(value):
+    """Only for Docker errors of this script's guarded synthetic probes."""
+    value = str(value)
+    value = apps.re.sub(r"[\x00-\x1f\x7f]", " ", value)
+    value = apps.re.sub(r"https?://[^\s\"]+", "<url>", value)
+    value = apps.re.sub(r"/[A-Za-z0-9_./:@+~=-]+", "<path>", value)
+    value = apps.re.sub(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", "<ip>", value)
+    value = apps.re.sub(r"[A-Za-z0-9_+/=-]{32,}", "<value>", value)
+    return value[:1500]
+
+
+def save_diagnostic(value):
+    # Only our synthetic project's runtime errors; never inspect Config/Env,
+    # credentials, real application logs, request payloads or SQLite content.
+    directory = Path.home() / ".local/state/gserver/verification"
+    try:
+        if directory.resolve() != directory:
+            return False
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_uid != apps.os.geteuid() or directory.stat().st_mode & 0o077:
+            return False
+        with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as stream:
+            path = Path(stream.name)
+            json.dump(value, stream)
+        try:
+            path.replace(directory / "app-smoke-error.json")
+        finally:
+            path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 def main():
     phase = "PRECHECK"
     created = []
@@ -75,7 +108,7 @@ def main():
                 "user": "65534:65534", "read_only": True,
                 "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"],
                 "mem_limit": "64m", "cpus": "0.25", "pids_limit": 32,
-                "logging": {"driver": "local", "options": {"max-size": "1m", "max-file": "1"}},
+                "logging": {"driver": "local", "options": {"max-size": "1m", "max-file": "2"}},
                 "volumes": [{"type": "volume", "source": "state", "target": "/var/lib/gserver"}],
                 "command": ["python3", "-u", "-c",
                     "from pathlib import Path; import time; p=Path('/var/lib/gserver/app-probe'); "
@@ -146,8 +179,49 @@ def main():
             operate("status", names[0])
             operate("logs", names[0])
             print("APP_CONFIG_UPDATE_ROLLBACK=PASS", flush=True)
-        except (apps.AppError, OSError, ValueError, KeyError, TypeError):
+        except (apps.AppError, OSError, ValueError, KeyError, TypeError) as exc:
             failure = phase
+            # No ordinary app logs/configuration are dumped. These are our own
+            # random synthetic projects, created only after collision guards.
+            code = str(exc) if isinstance(exc, apps.AppError) else type(exc).__name__
+            if apps.re.fullmatch(r"[A-Z_]+", code):
+                print("APP_FAILURE_DETAIL=" + code, flush=True)
+            if phase in ("APP_START", "STOP_ISOLATION", "UPDATE_ROLLBACK"):
+                diagnostic = {"schema": "gserver.synthetic-app-error.v1", "phase": phase,
+                              "compose_error": getattr(exc, "diagnostic", ""), "containers": []}
+                if diagnostic["compose_error"]:
+                    print("PROBE_COMPOSE_ERROR=" + safe_runtime_error(diagnostic["compose_error"]))
+                for name in created:
+                    try:
+                        ids = docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + apps.project(name)).split()
+                        for container_id in ids:
+                            row = json.loads(docker("inspect", container_id))[0]
+                            if row.get("Config", {}).get("Labels", {}).get("com.docker.compose.project") != apps.project(name):
+                                continue
+                            state = row.get("State", {})
+                            print("PROBE_EXIT_CODE=" + str(int(state.get("ExitCode", -1))))
+                            print("PROBE_OOM_KILLED=" + str(bool(state.get("OOMKilled", False))))
+                            diagnostic["containers"].append({"exit_code": state.get("ExitCode"),
+                                "oom_killed": state.get("OOMKilled"), "runtime_error": state.get("Error", "")})
+                            if state.get("Error"):
+                                print("PROBE_RUNTIME_ERROR=" + safe_runtime_error(state["Error"]))
+                            # Only classified error types, never paths/tokens.
+                            log = docker("logs", "--tail", "20", container_id)
+                            for error in ("PermissionError", "FileNotFoundError", "SyntaxError", "Read-only file system", "ModuleNotFoundError"):
+                                if error in log:
+                                    print("PROBE_PROCESS_ERROR=" + error.replace(" ", "_"))
+                    except (apps.AppError, ValueError, KeyError, TypeError):
+                        print("PROBE_DIAGNOSTIC=UNAVAILABLE")
+                if diagnostic["compose_error"] or diagnostic["containers"]:
+                    print("PROBE_PRIVATE_DIAGNOSTIC=" + ("SAVED" if save_diagnostic(diagnostic) else "UNAVAILABLE"))
+                diagnostic = getattr(exc, "diagnostic", "").lower()
+                for fragment, reason in (("permission denied", "PERMISSION_DENIED"),
+                        ("no such image", "LOCAL_IMAGE_MISSING"), ("unhealthy", "HEALTHCHECK_FAILED"),
+                        ("read-only file system", "READ_ONLY_FILESYSTEM"),
+                        ("invalid mount", "MOUNT_REJECTED"), ("exited", "PROCESS_EXITED"),
+                        ("cannot allocate memory", "MEMORY_UNAVAILABLE"), ("no space left", "DISK_FULL")):
+                    if fragment in diagnostic:
+                        print("PROBE_DOCKER_REASON=" + reason)
         finally:
             for name in reversed(created):
                 try:

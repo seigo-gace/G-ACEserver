@@ -145,4 +145,12 @@ class AppTests(unittest.TestCase):
                 with self.assertRaisesRegex(a.AppError, 'STATUS_FORMAT_INVALID'):
                     a.execute('status', self.file, 'sample')
 
+    def test_local_logging_compression_and_file_count_are_compatible(self):
+        for options in ({'max-file': '1'}, {'max-file': '1', 'compress': 'true'}, {'max-file': '0'}, {'max-file': 'invalid'}):
+            with self.subTest(options=options), self.assertRaisesRegex(a.AppError, 'LOCAL_LOG_ROTATION_INVALID'):
+                self.config({'services': {'web': {'logging': {'driver': 'local', 'options': options}}}})
+        for options in ({'max-file': '2'}, {'max-file': '1', 'compress': 'false'}, {}):
+            with self.subTest(options=options):
+                self.config({'services': {'web': {'logging': {'driver': 'local', 'options': options}}}})
+
 if __name__ == '__main__': unittest.main()
