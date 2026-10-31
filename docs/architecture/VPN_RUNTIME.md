@@ -43,7 +43,7 @@ python3 -B scripts/smoke_gserver_vpn_live.py
 ## 未実装・未受入を明確にする
 
 - controller/Compose解析/単体試験は**実WireGuard接続・kernel漏洩防止の証明ではない**。NET_ADMIN、nftables kernel適用、Gluetun digest/起動権限、MTU、DNS、IPv6、kill/recreate時の漏洩を隔離実機で試験する。
-- `render --cloudflared-image` で **cloudflared を `network_mode: service:vpn` として同じguard付きnamespaceへ追加**できる。Tunnel tokenはCompose/envに入れず、bundle内の0600 `cloudflared.credential` を `start` 時にcontainer tmpfsへstdin供給する。Cloudflare zone/Tunnel/Access/WAF/Webhookの**実変更・実接続は行わない**。**Cloudflare IP秘匿の達成とはしない。**
+- `render --cloudflared-image` で **cloudflared を `network_mode: service:vpn` として同じguard付きnamespaceへ追加**できる。Tunnel tokenはCompose/env/argvに入れず、bundle内の0600 `cloudflared.credential` を `start` 時にowner検証済み短命helperへstdin供給し、UID65534/0400のprivate staging fileをread-only secret mountしてnative `--token-file`で読む。Cloudflare zone/Tunnel/Access/WAF/Webhookの**実変更・実接続は行わない**。**Cloudflare IP秘匿の達成とはしない。**
 - appの設定/Secret/永続データ/healthcheck/正当な宛先はapp Owner契約から追加する。新Botを生成したり既存BotのSourceを書き換えたりしない。
 - guardは出口経路の防御。Telegram API宛の不正持出し、webhook replay、SSRF、媒体処理制約はapp契約と攻撃試験も必要。namespace内IPv4を許すことを全攻撃防止と呼ばない。
 - endpoint pinは現在の有効性/出所を記録し、更新時は新しいbundleを生成して再試験する。endpoint名の自動DNS解決、JP/KR自動切替は未実装。
@@ -100,3 +100,15 @@ GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/v
 ```
 
 この順次試験の成功を自動failover/本番常時稼働/速度合格と扱わない。KR実機結果を取得するまではKRは未受入。新しいVPN鍵・パッケージ・image・定期実行を追加しない。
+
+## Cloudflare native connectorの事前検証（R18）
+
+公式distroless imageに/bin/shを前提としない。native token-file起動、IPv4 edge指定、VPN専用DNS Config、cap_drop ALL/nonroot/read_onlyを使用する。元Tokenはowner-only0600で保持し、CF実行bundleはHost tmpfs上のprivate directoryを使う（例/dev/shm内）。短命sudo helperがstdinからowner一致0700 bundleの固定新規fileへ書き、UID65534/0400にする。開いたdirectory FDのfilesystemがtmpfs以外なら作成前に拒否する。親directoryは0700、fileはO_EXCL/O_NOFOLLOWで既存物を上書きしない。secret bind mountはconnectorだけへ提供し、元Tokenの権限を緩めない。helper失敗は起動中止。Compose読込前にprivate secret fileを準備し、controllerはguardとapp DNS確認後にconnectorを起動する。実Token/Provider所有者/設定を未確認のまま試験接続しない。
+
+```bash
+bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --cloudflare-local
+```
+
+これは既存local digestのversion/helpとUID65534でのnative実行・token-file対応をnetwork noneで試験し、合成非秘密fileのprivate stagingと本番と同じCompose secretsによるread-only読取を確認する。実credential、Tunnel、DNS、Access設定を使わず、Providerへ接続しない。read_only/cap_drop/resource bounds/no pullを維持し、残存containerは当該random監査labelだけcleanupし既存container不変を確認する。成功してもCloudflare E2EはNOT_RUN。
+
+既存のCloudflare Account APIは共通Vault broker契約を使い、Tunnel tokenとは分離する。WSLで契約経路が利用できない場合に、新TokenやContaboへの接続で代替しない。既存設定の所在・所有zone・正式認可を確認する。

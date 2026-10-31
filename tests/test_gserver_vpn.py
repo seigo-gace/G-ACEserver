@@ -119,16 +119,21 @@ class VPNTests(unittest.TestCase):
                 self.assertEqual(p.stat().st_mode & 0o077, 0)
         self.assertEqual(set(manifest['acceptance'].values()), {'NOT_VERIFIED'})
 
-    def test_cloudflared_shares_vpn_without_compose_secrets(self):
+    def test_cloudflared_native_file_shares_vpn_without_secret_values(self):
         out = self.root / 'tunnel-bundle'
         vpn.render(out, 'jp', self.path, VPN_IMAGE, APP_IMAGE, cloudflared_image=TUNNEL_IMAGE)
         config = json.loads((out / 'compose.json').read_text())
         tunnel = config['services']['cloudflared']
         self.assertEqual(tunnel['network_mode'], 'service:vpn')
+        self.assertNotIn('entrypoint', tunnel)
+        self.assertIn('--token-file', tunnel['command'])
+        self.assertNotIn('--token', tunnel['command'])
+        self.assertEqual(tunnel['configs'], config['services']['app']['configs'])
+        self.assertEqual(config['secrets']['tunnel_token']['file'], './cloudflared.runtime-token')
         self.assertNotIn('environment', tunnel)
         blob = json.dumps(config)
         self.assertNotIn('eyJ', blob)
-        self.assertIn('/run/gserver-tunnel/credential', blob)
+        self.assertIn('/run/secrets/gserver-tunnel-token', blob)
 
     def test_bundle_file_modes_separate_secret_and_resolv(self):
         out, _ = self.bundle()
@@ -305,6 +310,98 @@ class VPNTests(unittest.TestCase):
         self.assertEqual(command,['nsenter','--net=/proc/self/fd/9','ip','-j','-d','-s','link','show','dev','tun0'])
         self.assertEqual(runner.call_args.kwargs['pass_fds'],(9,))
         close.assert_called_once_with(9)
+
+    def test_secret_exists_before_compose_and_connector_starts_after_app_dns(self):
+        out=self.root/'connector-start'
+        manifest=vpn.render(out,'jp',self.path,VPN_IMAGE,APP_IMAGE,cloudflared_image=TUNNEL_IMAGE)
+        (out/vpn.TUNNEL_CREDENTIAL).write_bytes(b'synthetic-token')
+        (out/vpn.TUNNEL_CREDENTIAL).chmod(0o600)
+        events=[]
+        def run(cmd,**kwargs):
+            events.append(cmd)
+            if 'ps' in cmd:
+                return '' if '-aq' in cmd else 'synthetic-container'
+            if vpn.NAMESPACE_HELPER in cmd:
+                return json.dumps({'ok':True,'inode':2,'nft':{'nftables':[]}})
+            if 'inspect' in cmd and 'image' not in cmd:
+                return json.dumps([{'State':{'Pid':4242,'Running':True,'Health':{'Status':'healthy'}},
+                                    'Config':{'Labels':{'com.docker.compose.project':manifest['project']}}}])
+            return ''
+        def stage(directory,token):
+            self.assertEqual(token,b'synthetic-token')
+            events.append(['TOKEN_STAGED'])
+        with mock.patch.object(vpn,'run',side_effect=run), \
+             mock.patch.object(vpn,'verify_sidecar_resolv',side_effect=lambda *a:events.append(['DNS_VERIFIED'])), \
+             mock.patch.object(vpn,'stage_tunnel_credential',side_effect=stage):
+            vpn.start(out)
+        dns=events.index(['DNS_VERIFIED']);token=events.index(['TOKEN_STAGED'])
+        connector=next(i for i,c in enumerate(events) if 'up' in c and c[-1]=='cloudflared')
+        vpn_start=next(i for i,c in enumerate(events) if 'up' in c and c[-1]=='vpn')
+        self.assertLess(token,vpn_start);self.assertLess(dns,connector)
+        self.assertFalse(any('synthetic-token' in repr(c) for c in events))
+        self.assertFalse(any('exec' in c and 'cloudflared' in c for c in events))
+
+    def test_tunnel_staging_is_owner_scoped_private_and_stdin_only(self):
+        import os,stat,sys
+        fake=types.SimpleNamespace(st_uid=1000,st_mode=stat.S_IFDIR|0o700)
+        with mock.patch.object(sys,'argv',['helper','private-dir','1000']), \
+             mock.patch.object(sys,'stdin',types.SimpleNamespace(buffer=io.BytesIO(b'synthetic-token'))), \
+             mock.patch.dict(os.environ,{'SUDO_UID':'1000'}),mock.patch('os.open',side_effect=[9,10]) as opened, \
+             mock.patch('os.fstat',return_value=fake),mock.patch('os.write',return_value=15), \
+             mock.patch('subprocess.run',return_value=types.SimpleNamespace(stdout='tmpfs\n')), \
+             mock.patch('os.fchown') as chown,mock.patch('os.fchmod') as chmod,mock.patch('os.fsync'), \
+             mock.patch('os.close'),contextlib.redirect_stdout(io.StringIO()) as output:
+            exec(vpn.TUNNEL_STAGE_HELPER,{})
+        self.assertEqual(json.loads(output.getvalue()),{'ok':True})
+        self.assertNotIn('synthetic-token',output.getvalue())
+        flags=opened.call_args_list[1].args[1]
+        self.assertTrue(flags & os.O_EXCL and flags & os.O_NOFOLLOW)
+        self.assertEqual(opened.call_args_list[1].kwargs['dir_fd'],9)
+        chown.assert_called_once_with(10,65534,65534)
+        chmod.assert_called_once_with(10,0o400)
+
+    def test_tunnel_staging_rejects_owner_permissions_and_existing_file(self):
+        import os,stat,sys
+        for uid,mode,exists in ((1001,0o700,False),(1000,0o755,False),(1000,0o700,True)):
+            with self.subTest(uid=uid,mode=mode,exists=exists), \
+                 mock.patch.object(sys,'argv',['helper','private-dir','1000']), \
+                 mock.patch.object(sys,'stdin',types.SimpleNamespace(buffer=io.BytesIO(b'synthetic-token'))), \
+                 mock.patch.dict(os.environ,{'SUDO_UID':'1000'}), \
+                 mock.patch('os.open',side_effect=[9,FileExistsError()] if exists else [9]) as opened, \
+                 mock.patch('os.fstat',return_value=types.SimpleNamespace(st_uid=uid,st_mode=stat.S_IFDIR|mode)), \
+                 mock.patch('subprocess.run',return_value=types.SimpleNamespace(stdout='tmpfs\n')), \
+                 mock.patch('os.write') as write,mock.patch('os.unlink') as unlink, \
+                 mock.patch('os.close'),contextlib.redirect_stdout(io.StringIO()) as output:
+                exec(vpn.TUNNEL_STAGE_HELPER,{})
+            self.assertFalse(json.loads(output.getvalue())['ok'])
+            write.assert_not_called();unlink.assert_not_called()
+            self.assertEqual(opened.call_count,2 if exists else 1)
+
+    def test_tunnel_staging_refuses_disk_filesystem_before_creating_file(self):
+        import os,stat,sys
+        with mock.patch.object(sys,'argv',['helper','private-dir','1000']), \
+             mock.patch.object(sys,'stdin',types.SimpleNamespace(buffer=io.BytesIO(b'synthetic-token'))), \
+             mock.patch.dict(os.environ,{'SUDO_UID':'1000'}),mock.patch('os.open',return_value=9) as opened, \
+             mock.patch('os.fstat',return_value=types.SimpleNamespace(st_uid=1000,st_mode=stat.S_IFDIR|0o700)), \
+             mock.patch('subprocess.run',return_value=types.SimpleNamespace(stdout='ext4\n')) as findmnt, \
+             mock.patch('os.write') as write,mock.patch('os.close'), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            exec(vpn.TUNNEL_STAGE_HELPER,{})
+        self.assertEqual(json.loads(output.getvalue())['code'],'TUNNEL_STAGE_REQUIRES_TMPFS')
+        self.assertEqual(findmnt.call_args.kwargs['pass_fds'],(9,))
+        self.assertEqual(opened.call_count,1)
+        write.assert_not_called()
+
+    def test_tunnel_stage_wrapper_validates_and_keeps_token_out_of_argv(self):
+        with mock.patch.object(vpn,'run',return_value='{"ok":true}') as run:
+            vpn.stage_tunnel_credential(self.root,b'synthetic-token')
+        self.assertNotIn('synthetic-token',repr(run.call_args.args))
+        self.assertEqual(run.call_args.kwargs['input'],'synthetic-token')
+        for token in (b'',b'bad token',b'bad\nvalue',b'a'*8193):
+            with mock.patch.object(vpn,'run') as run:
+                with self.assertRaisesRegex(vpn.VPNError,'CLOUDFLARED_TOKEN_INVALID'):
+                    vpn.stage_tunnel_credential(self.root,token)
+                run.assert_not_called()
 
     def test_policy_fingerprint_ignores_only_counters_and_handles(self):
         a={'nft':{'nftables':[{'rule':{'handle':1,'expr':[{'counter':{'packets':0,'bytes':0}},{'drop':None}]}}]}}

@@ -17,7 +17,7 @@ SLOTS = (
     ('vpn_image_digest', 'pinned local Gluetun image', 'gserver_vpn.py preflight --vpn-image IMAGE'),
     ('app_image_digest', 'pinned local app image', 'preflight --app-image IMAGE'),
     ('cloudflared_image_digest', 'pinned local cloudflared image', 'preflight --cloudflared-image IMAGE'),
-    ('cloudflared_tunnel_credential', '0600 cloudflared.credential in bundle dir', 'bundle/cloudflared.credential at start'),
+    ('cloudflared_tunnel_credential', '0600 original; UID65534 0400 private native token-file staging', 'bundle/cloudflared.credential at start'),
     ('bot_app_compose', 'Bot-owned Compose (separate repo)', 'gserver_apps.py verify APP COMPOSE'),
     ('bot_webhook_secret', 'Telegram webhook secret (Bot owner)', 'WAIT_REAL_CONNECTION'),
     ('gateway_url_token', 'existing Gateway private HTTPS (optional bridge)', 'WAIT_REAL_CONNECTION'),

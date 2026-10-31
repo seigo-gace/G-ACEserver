@@ -36,3 +36,7 @@ Thumbs.db
 Windscribe-*-WG.conf
 wireguard.conf
 vpn-bundles/
+
+# Local Cloudflare tunnel credentials (original and container-owned staging)
+cloudflared.credential
+cloudflared.runtime-token

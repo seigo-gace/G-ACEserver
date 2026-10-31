@@ -45,9 +45,54 @@ APP_VPN_HEALTHCHECK = {
              "'http://127.0.0.1:8000/v1/publicip/ip', timeout=3).read(1)"],
     'interval': '5s', 'timeout': '5s', 'retries': 12, 'start_period': '45s',
 }
-CLOUDFLARED_WAIT = ('while [ ! -f /run/gserver-guard/ready ]; do sleep 1; done; '
-                    'while [ ! -f /run/gserver-tunnel/credential ]; do sleep 3600; done; '
-                    'exec cloudflared tunnel --no-autoupdate run --token "$(cat /run/gserver-tunnel/credential)"')
+TUNNEL_RUNTIME_FILE = 'cloudflared.runtime-token'
+TUNNEL_CONTAINER_FILE = '/run/secrets/gserver-tunnel-token'
+TUNNEL_RUN_PREFIX = ('tunnel', '--no-autoupdate', '--edge-ip-version', '4', 'run')
+
+# Fixed filename inside a private owner directory; never an arbitrary privileged
+# destination/chown. Token arrives only over stdin, not argv or environment.
+TUNNEL_STAGE_HELPER = r"""
+import json,os,re,stat,subprocess,sys
+folder=None
+file=None
+created=False
+name='cloudflared.runtime-token'
+reason='TUNNEL_PRIVATE_STAGE_FAILED'
+try:
+ owner=int(sys.argv[2])
+ if owner!=int(os.environ.get('SUDO_UID',str(os.getuid()))):
+  raise ValueError()
+ data=sys.stdin.buffer.read(8193).strip()
+ if not re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}',data):
+  raise ValueError()
+ folder=os.open(sys.argv[1],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ info=os.fstat(folder)
+ if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700:
+  raise ValueError()
+ fs=subprocess.run(['findmnt','-n','-o','FSTYPE','-T','/proc/self/fd/'+str(folder)],pass_fds=(folder,),check=True,capture_output=True,text=True,timeout=10)
+ if fs.stdout.strip()!='tmpfs':
+  reason='TUNNEL_STAGE_REQUIRES_TMPFS'
+  raise ValueError()
+ file=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400,dir_fd=folder)
+ created=True
+ remaining=memoryview(data)
+ while remaining:
+  written=os.write(file,remaining)
+  if written<=0:raise OSError()
+  remaining=remaining[written:]
+ os.fchown(file,65534,65534)
+ os.fchmod(file,0o400)
+ os.fsync(file)
+ print(json.dumps({'ok':True}))
+except (OSError,ValueError,subprocess.SubprocessError):
+ if created:
+  try:os.unlink(name,dir_fd=folder)
+  except OSError:pass
+ print(json.dumps({'ok':False,'code':reason}))
+finally:
+ if file is not None:os.close(file)
+ if folder is not None:os.close(folder)
+"""
 
 
 # Executed only through the caller's existing sudo authority. Opening the netns
@@ -454,9 +499,11 @@ def render(directory, region, source, vpn_image, app_image, endpoint_ip=None, cl
         config['services']['cloudflared'] = {**read_only_sidecar, 'image': cloudflared_image, 'pull_policy': 'never',
             'user': '65534:65534', 'network_mode': 'service:vpn',
             'depends_on': {'vpn': {'condition': 'service_healthy'}},
-            'entrypoint': ['/bin/sh', '-ec', CLOUDFLARED_WAIT],
-            'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700',
-                      '/run/gserver-tunnel:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=65534,gid=65534']}
+            'command': list(TUNNEL_RUN_PREFIX) + ['--token-file', TUNNEL_CONTAINER_FILE],
+            'configs': [{'source': 'vpn_dns', 'target': '/etc/resolv.conf'}],
+            'secrets': [{'source': 'tunnel_token', 'target': 'gserver-tunnel-token'}],
+            'tmpfs': ['/tmp:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700']}
+        config['secrets'] = {'tunnel_token': {'file': './' + TUNNEL_RUNTIME_FILE}}
     contents = {'compose.json': json.dumps(config, indent=2) + '\n',
                 'guard.nft': guard_rules(selected, p['port']),
                 'wireguard.conf': wireguard_conf,
@@ -692,6 +739,21 @@ def policy_fingerprint(report):
     return hashlib.sha256(json.dumps(clean(report['nft']),sort_keys=True).encode()).hexdigest()
 
 
+def stage_tunnel_credential(directory, token):
+    if not re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}', token.strip()):
+        raise VPNError('CLOUDFLARED_TOKEN_INVALID')
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
+    try:
+        result = json.loads(run(privilege + ['python3', '-c', TUNNEL_STAGE_HELPER,
+                                            str(directory), str(os.getuid())],
+                                input=token.decode('ascii'), step='stage_private_tunnel_file'))
+    except (ValueError, UnicodeError) as exc:
+        raise VPNError('TUNNEL_PRIVATE_STAGE_FAILED') from exc
+    if not isinstance(result, dict) or result.get('ok') is not True:
+        code = result.get('code') if isinstance(result, dict) else None
+        raise VPNError('TUNNEL_STAGE_REQUIRES_TMPFS' if code == 'TUNNEL_STAGE_REQUIRES_TMPFS' else 'TUNNEL_PRIVATE_STAGE_FAILED')
+
+
 def start(directory):
     directory, manifest = load(directory)
     privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
@@ -707,6 +769,11 @@ def start(directory):
     config = json.loads((directory / 'compose.json').read_text())
     for service in config['services'].values():
         run(docker + ['image', 'inspect', pinned(service['image'])])
+    # Compose must see its file-backed secret when loading the project. Only
+    # prepare private local data here; connector starts after guard/app checks.
+    if 'cloudflared' in config['services']:
+        _, token = private_read(directory / TUNNEL_CREDENTIAL, limit=8192)
+        stage_tunnel_credential(directory, token)
     created = False
     try:
         created = True
@@ -741,19 +808,6 @@ def start(directory):
         current = namespace_guard(pid)
         if current['inode'] != initial['inode'] or policy_fingerprint(current) != policy_fingerprint(initial):
             raise VPNError('VPN_GUARD_CHANGED_DURING_BOOTSTRAP')
-        if 'cloudflared' in config['services']:
-            credential = directory / TUNNEL_CREDENTIAL
-            if not credential.is_file():
-                raise VPNError('CLOUDFLARED_CREDENTIAL_MISSING')
-            run(compose + ['up', '-d', '--no-build', '--pull', 'never', 'cloudflared'])
-            tunnel_ids = run(compose + ['ps', '-q', 'cloudflared']).split()
-            if len(tunnel_ids) != 1:
-                raise VPNError('CLOUDFLARED_CONTAINER_MISSING')
-            _, token = private_read(credential, limit=8192)
-            if not token.strip():
-                raise VPNError('CLOUDFLARED_CREDENTIAL_EMPTY')
-            run(docker + ['exec', '-i', tunnel_ids[0], '/bin/sh', '-ec',
-                           'umask 077; cat > /run/gserver-tunnel/credential'], input=token.decode('ascii'))
         if 'app' in config['services']:
             ready = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120']
             try:
@@ -767,6 +821,9 @@ def start(directory):
             if len(app_ids) != 1:
                 raise VPNError('APP_CONTAINER_MISSING')
             verify_sidecar_resolv(docker, app_ids[0])
+        if 'cloudflared' in config['services']:
+            run(compose + ['up', '-d', '--no-build', '--pull', 'never', 'cloudflared'],
+                step='compose_up_cloudflared_native_token_file')
     except VPNError as exc:
         if created:
             try:

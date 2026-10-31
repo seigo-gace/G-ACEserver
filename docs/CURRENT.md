@@ -3,7 +3,8 @@
 - **Master実機 / Source2822b2f:** wrapper86 tests PASS。JPは実HTTPS/JP出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。JP内でKR candidateを取得しJP cleanup・不変確認後にprivate pinを保存、KRを新namespaceで起動。KRも実HTTPS/KR出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。両方VERIFY=PASS/ERROR=NONE/exit0。実IP/鍵/hostnameは公開しない。
 - **範囲:** Handshake timestamp NOT_COLLECTED。JP0.562/0.586秒・KR0.609/0.837秒は少数HTTPSサンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN、常時運用/自動切替/復旧/媒体/Vault/F01〜F08は別の未完了Gate。
 - **Cloudflare調査:** server-coreのCloudflare/Shared Secret契約を取得。既定cloudflared設定とCursor MCP設定、ローカルbroker認証経路なし。ローカル契約portは待受なし。既存Gserver settingsにはCloudflare関連keyなし。Account brokerとTunnel credentialは別契約。Contaboへ接続せず、Astera/共有Providerも不変更。Masterへ既存設定の所在を照会中（値の貼付は不要）。
-- **次の独立Source作業:** R18のnative token-file/DNS構成に修正し、資格情報なし・network noneのlocal image検証を準備。所有zone/Tunnel/Accessと正式利用経路が分かるまでProvider操作や実Tunnel参加はしない。
+- **Cloudflare Source:** R18に従いshell待機/Token argvを除去、native token-file、IPv4 edge、VPN DNS Configへ修正。元Token0600と親dir0700を保持し、短命sudo helperがowner一致private tmpfs dir FD内の固定新規fileをUID65534/0400で作成してread-only secret mountする。O_EXCL/O_NOFOLLOW、stdinのみ、既存上書き拒否。Core・VPN guardは不変更。
+- **次:** `bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --cloudflare-local` で既存local digestのnative version/helpと合成fileのCompose secrets非root読取をnetwork noneで検証。重点wrapper96 tests PASS（readinessを含む重点98 PASS）。確定Sourceの全回帰318 tests PASS、shell構文/diff check PASS。実機監査は結果待ち、CIは未確認。実Tunnel/Account APIは所有zone/既存設定/正式認可が確認できるまで未実行。
 
 ---
 

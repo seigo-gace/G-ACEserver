@@ -40,5 +40,8 @@ fi
     def test_default_keeps_selected_single_region(self):
         self.assertEqual(self.run_wrapper(), (0, ['kr:']))
 
+    def test_local_cloudflare_mode_runs_no_live_vpn(self):
+        self.assertEqual(self.run_wrapper(('--cloudflare-local',)), (0, []))
+
     def test_unknown_arguments_fail_before_testing_or_runtime(self):
         self.assertEqual(self.run_wrapper(('--unknown',)), (2, []))
