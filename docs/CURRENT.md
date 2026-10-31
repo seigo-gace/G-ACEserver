@@ -1,3 +1,13 @@
+# 2026-10-31 Codex｜JP実通信PASS・DNS遮断試験の拒否応答対応
+
+- **Master実機（7bb9056）:** focused72 PASS。app DNS設定/UID読取PASS。固定IPv4/名前付きの実HTTPSとDNS名前解決PASS、日本出口JP一致、kernel WireGuard種類/namespace/interfaceとRX/TX増加PASS。HTTPS試験時間は0.525/0.652秒であり性能合格ではない。Handshake時刻NOT_COLLECTED。Core/Storage/他container不変PASS。
+- **未到達:** NET_GUARDSのUDP送信（inline Python line3）でEPERMによりFAIL。DNS UDP/TCP遮断・IPv6・Kill Switch・全体VPN受入・Cloudflareは未合格。前段の実通信PASSを全体完成へ拡大しない。
+- **最小修正:** Docker DNS宛UDP送信のEPERM/EACCESのみ結果deniedとして返し、通常sentと同様に独立nft UDP/TCP両drop counter増加・namespace/guard不変を必須とした。permission denialだけで合格にせず、counter増加なし/未知errno/Docker exec失敗はFAIL。socketはfinallyでclose。保護設定・Core/Storage・image不変。
+- **Source検証:** 全回帰296 tests PASS、wrapper重点74 tests PASS、shell/diff PASS。修正後の実機結果は待機中。
+- **次:** 既存wrapperでJP受入を再実行（74 focused tests）。本人の同一WSL端末が実機実行を担当、Codexは解析/修正を継続。KR pin/復旧/性能/Cloudflare統合・F01〜F08最終受入は維持して未完了。CI NOT_RUN。
+
+---
+
 # 2026-10-31 Codex｜DNS実機PASS・wg不在による試験修復
 
 - **Master実機（3fe4aeb）:** focused70 PASS。readinessはJP pin/profile/local immutable imagesあり、KR pinなし。`APP_RESOLV_CONF_APPLIED=PASS`・`APP_DNS_VPN_NAMESERVER=PASS`。VPN_EGRESSで `wg: executable file not found` によりFAIL。Core/Storage/他container不変PASS。VPN通信・DNS遮断・Kill Switch・Cloudflare受入へは未到達。

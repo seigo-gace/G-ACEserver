@@ -216,17 +216,48 @@ class RealNetworkEvidence(unittest.TestCase):
             with self.subTest(udp=udp,tcp=tcp), \
                  mock.patch.object(live,'app_guard',side_effect=[self.report(),self.report(udp,tcp)]), \
                  mock.patch.object(live,'tcp_connected',return_value=False), \
-                 mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'sent':True},{'disabled':'1'}]):
+                 mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'outcome':'sent'},{'disabled':'1'}]):
                 if accepted: live.verify_network_guards('app')
                 else:
                     with self.assertRaisesRegex(vpn.VPNError,'DNS_GUARD_DROP_NOT_OBSERVED'):
                         live.verify_network_guards('app')
 
+    def test_udp_denial_still_requires_both_nft_counters(self):
+        for count in (0,1):
+            with mock.patch.object(live,'app_guard',side_effect=[self.report(),self.report(count,count)]), \
+                 mock.patch.object(live,'tcp_connected',return_value=False), \
+                 mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'outcome':'denied'},{'disabled':'1'}]):
+                if count: live.verify_network_guards('app')
+                else:
+                    with self.assertRaisesRegex(vpn.VPNError,'DNS_GUARD_DROP_NOT_OBSERVED'):
+                        live.verify_network_guards('app')
+
+    def test_generated_udp_probe_handles_only_expected_permission_denial(self):
+        import contextlib,errno,io,json,socket
+        with mock.patch.object(live,'app_guard',side_effect=[self.report(),self.report(1,1)]), \
+             mock.patch.object(live,'tcp_connected',return_value=False), \
+             mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'outcome':'sent'},{'disabled':'1'}]) as probe:
+            live.verify_network_guards('app')
+        code=probe.call_args_list[0].args[1]
+        for error,outcome in ((None,'sent'),(PermissionError(errno.EPERM,'denied'),'denied'),
+                               (PermissionError(errno.EACCES,'denied'),'denied'),
+                               (OSError(errno.EBADF,'bad descriptor'),None)):
+            output=io.StringIO()
+            with self.subTest(error=error), mock.patch.object(socket,'socket') as sock, \
+                 mock.patch('os.getuid',return_value=65534),contextlib.redirect_stdout(output):
+                sock.return_value.sendto.side_effect=error
+                if outcome:
+                    exec(code,{})
+                    self.assertEqual(json.loads(output.getvalue()),{'uid':65534,'outcome':outcome})
+                else:
+                    with self.assertRaises(OSError): exec(code,{})
+                sock.return_value.close.assert_called_once()
+
     def test_ipv6_must_be_disabled_and_public_connect_fail(self):
         for disabled,connect in (('0',False),('1',True)):
             with mock.patch.object(live,'app_guard',side_effect=[self.report(),self.report(1,1)]), \
                  mock.patch.object(live,'tcp_connected',side_effect=[False,connect]), \
-                 mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'sent':True},{'disabled':disabled}]):
+                 mock.patch.object(live,'app_json',side_effect=[{'uid':65534,'outcome':'sent'},{'disabled':disabled}]):
                 with self.assertRaisesRegex(vpn.VPNError,'IPV6_NOT_BLOCKED'):
                     live.verify_network_guards('app')
 

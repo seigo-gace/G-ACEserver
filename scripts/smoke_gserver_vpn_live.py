@@ -134,11 +134,16 @@ def verify_network_guards(container):
     if tcp_connected(container, '127.0.0.11', 53):
         raise vpn.VPNError('DOCKER_DNS_TCP_LEAK')
     result = app_json(container,
-        "import json,os,socket\n"
+        "import errno,json,os,socket\n"
         "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)\n"
-        "s.sendto(bytes.fromhex('123401000001000000000000076578616d706c6503636f6d0000010001'),('127.0.0.11',53))\n"
-        "s.close()\nprint(json.dumps({'uid':os.getuid(),'sent':True}))\n")
-    if result.get('uid') != 65534 or result.get('sent') is not True:
+        "try:\n"
+        " s.sendto(bytes.fromhex('123401000001000000000000076578616d706c6503636f6d0000010001'),('127.0.0.11',53));outcome='sent'\n"
+        "except PermissionError as e:\n"
+        " if e.errno not in (errno.EPERM,errno.EACCES): raise\n"
+        " outcome='denied'\n"
+        "finally:\n s.close()\n"
+        "print(json.dumps({'uid':os.getuid(),'outcome':outcome}))\n")
+    if result.get('uid') != 65534 or result.get('outcome') not in ('sent', 'denied'):
         raise vpn.VPNError('APP_PROBE_REPORT_INVALID')
     after = app_guard(container)
     unchanged_guard(before, after)
