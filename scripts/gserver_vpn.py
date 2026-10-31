@@ -47,6 +47,8 @@ APP_VPN_HEALTHCHECK = {
 }
 TUNNEL_RUNTIME_FILE = 'cloudflared.runtime-token'
 TUNNEL_CONTAINER_FILE = '/run/secrets/gserver-tunnel-token'
+ORIGIN_RUNTIME_FILE = 'cloudflared.runtime-origin-cert'
+ORIGIN_CONTAINER_FILE = '/run/secrets/gserver-origin-cert.pem'
 TUNNEL_RUN_PREFIX = ('tunnel', '--no-autoupdate', '--edge-ip-version', '4', 'run')
 
 # Fixed filename inside a private owner directory; never an arbitrary privileged
@@ -62,9 +64,15 @@ try:
  owner=int(sys.argv[2])
  if owner!=int(os.environ.get('SUDO_UID',str(os.getuid()))):
   raise ValueError()
- data=sys.stdin.buffer.read(8193).strip()
- if not re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}',data):
-  raise ValueError()
+ kind=sys.argv[3] if len(sys.argv)>3 else 'token'
+ names={'token':'cloudflared.runtime-token','origin-cert':'cloudflared.runtime-origin-cert'}
+ if kind not in names:raise ValueError()
+ name=names[kind]
+ data=sys.stdin.buffer.read(65537)
+ if len(data)>65536:raise ValueError()
+ data=data.strip()
+ valid=re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}',data) if kind=='token' else (len(data)<=65536 and re.fullmatch(rb'-----BEGIN ARGO TUNNEL TOKEN-----\s+[A-Za-z0-9+/=\s]+-----END ARGO TUNNEL TOKEN-----',data))
+ if not valid:raise ValueError()
  folder=os.open(sys.argv[1],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
  info=os.fstat(folder)
  if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700:
@@ -739,13 +747,16 @@ def policy_fingerprint(report):
     return hashlib.sha256(json.dumps(clean(report['nft']),sort_keys=True).encode()).hexdigest()
 
 
-def stage_tunnel_credential(directory, token):
-    if not re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}', token.strip()):
+def stage_tunnel_credential(directory, token, *, kind='token'):
+    if kind not in ('token', 'origin-cert'):
+        raise VPNError('TUNNEL_CREDENTIAL_KIND_INVALID')
+    valid = re.fullmatch(rb'[A-Za-z0-9_+/=.\-]{1,8192}', token.strip()) if kind == 'token' else (len(token) <= 65536 and re.fullmatch(rb'-----BEGIN ARGO TUNNEL TOKEN-----\s+[A-Za-z0-9+/=\s]+-----END ARGO TUNNEL TOKEN-----', token.strip()))
+    if not valid:
         raise VPNError('CLOUDFLARED_TOKEN_INVALID')
     privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
     try:
         result = json.loads(run(privilege + ['python3', '-c', TUNNEL_STAGE_HELPER,
-                                            str(directory), str(os.getuid())],
+                                            str(directory), str(os.getuid()), kind],
                                 input=token.decode('ascii'), step='stage_private_tunnel_file'))
     except (ValueError, UnicodeError) as exc:
         raise VPNError('TUNNEL_PRIVATE_STAGE_FAILED') from exc

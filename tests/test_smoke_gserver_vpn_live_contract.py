@@ -279,7 +279,7 @@ class RealNetworkEvidence(unittest.TestCase):
 
 
 class LiveLifecycleEvidence(unittest.TestCase):
-    def exercise(self, *, tcp=(True,False), transfer=True, https_fail=False, cleanup_fail=False):
+    def exercise(self, *, tcp=(True,False), transfer=True, https_fail=False, cleanup_fail=False, cloudflare=False):
         import contextlib,io
         report={'inode':10,'nft':{'nftables':[]}}
         def docker(*args):
@@ -287,11 +287,11 @@ class LiveLifecycleEvidence(unittest.TestCase):
             if args[0]=='inspect': return '[{"State":{"Health":{"Status":"healthy"}}}]'
             return ''
         output=io.StringIO()
-        with mock.patch.dict(live.os.environ,{'GSERVER_VPN_REGION':'jp','GSERVER_CLOUDFLARED_CREDENTIAL':''}), \
+        with mock.patch.dict(live.os.environ,{'GSERVER_VPN_REGION':'jp','GSERVER_CLOUDFLARED_CREDENTIAL':'', 'GSERVER_CLOUDFLARE_DISCOVERY':'1' if cloudflare else ''}), \
              mock.patch.object(live,'inventory',return_value={'existing':'same'}), \
              mock.patch.object(live,'storage',return_value=['same']), \
              mock.patch.object(live,'docker',side_effect=docker) as command, \
-             mock.patch.object(live,'resolve_images',return_value=('app','vpn',None)), \
+             mock.patch.object(live,'resolve_images',return_value=('app','vpn','cloudflare-image' if cloudflare else None)), \
              mock.patch.object(live.vpn,'profile'),mock.patch.object(live.vpn,'endpoint_pins',return_value={'jp':'pin'}), \
              mock.patch.object(live.vpn,'preflight',return_value={'endpoint_pin_jp':'CONFIGURED'}), \
              mock.patch.object(live.vpn,'render',return_value={'project':'gace-vpn-'+'a'*16}), \

@@ -1,3 +1,13 @@
+# 2026-10-31 Codex｜Cloudflare offline実機PASS・限定照会Source・認証Gate保留
+
+- **実機証拠維持:** Master返却のoffline image auditはSource e4e7356、重点96 tests、cloudflared 2026.10.7/native UID65534/token-file/合成private secret読取/network none/既存container不変PASS。実credential不使用、Provider操作なし。JP/KR実通信・DNS/IPv6・Kill Switchの既存PASSも維持する。Cloudflare E2E/性能/常時復旧/F01〜F08総合は未完了。
+- **Source実装:** R19の明示`--cloudflare-discover`を追加。Windows標準origin certificateのACL/hash/accountを先に検証し、JP VPN正規通信/guard確認後、native cloudflaredでlocal credentialと一致するIDだけ`list --output json --id`照会。run/route/delete/replica参加なし。原本・Provider診断を表示せず、JP Kill Switch/cleanup/Core不変成功後だけprivate metadataを保存。常用token-file接続とは別のread-only discoveryで、Cloudflare受入へ昇格しない。
+- **現在の認証Gate:** Windows実ACLは現在user/SYSTEM/管理者に加え、sandbox用と確認できるlocal groupと、名前解決できないSIDの継承ACEあり。第三者が現存/利用しているとの断定はしない。現行の厳格allowlistに不一致のためWINDOWS_ORIGIN_CERT_ACL_UNVERIFIED。Docker/証明書読取/staging/Provider照会前に停止する。元ACLの自動変更・既存sandbox group削除・新Token発行はしない。Masterへ同じ失敗が確実なコマンドを再実行依頼しない。
+- **検証:** 新規の拒否/対象限定/診断非表示/private staging/receipt/失敗cleanup試験を含む全回帰332 tests PASS、shell構文/diff check PASS。新しいCloudflare discoveryの実Provider結果はNOT_RUN、CI NOT_VERIFIED。既存Core/Storage/Host firewall/Windows原本/Cloudflare設定に変更なし。
+- **再開条件:** 認証の正式利用境界（sandbox ACL/未解決SIDの由来、または既存正式broker接続）を確定してからJP内の限定照会へ進む。Windows原本の権限を変更する場合は、影響/rollbackを先に具体化し個別承認を得る。用途/zone所有/既存routeの確認までは実Tunnel起動・DNS/Access変更をしない。Draft PR #15を維持。新Token/基盤/Contaboによる迂回は禁止。
+
+---
+
 # 2026-10-31 Codex｜Cloudflare local image/秘密供給の実機PASS・Windows既存credential発見
 
 - **Master実機 / Source e4e7356:** wrapper96 tests PASS。local cloudflared version2026.10.7、UID65534 native実行、token-file対応、private tmpfs staging→Compose secrets UID読取、既存container不変がPASS。network none、実credential不使用、Provider操作なし。VERIFY=PASS/ERROR=NONE/exit0。Cloudflare E2Eは引き続きNOT_RUN。

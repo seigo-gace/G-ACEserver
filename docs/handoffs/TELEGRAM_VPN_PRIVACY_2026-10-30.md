@@ -211,8 +211,13 @@ R18補強: 元のcontainer tmpfs意図を維持し、Token stagingを新たな�
 
 R18のlocal image/合成secret実機監査はMaster返却PASS。Windows標準cloudflared directoryに既存local-managed credential JSONとorigin certificateを発見し、同一accountを値非表示で照合した。Windows常駐serviceは0件、標準config YAMLはない。これはProvider上のTunnelが未使用という証拠ではない。
 
-既存wrapperの明示read-only discoveryで、現在のWindows user profileの標準certificateだけを使う。Windows ACLのowner/read boundaryとファイルhashを照合し、WSLで読む内容が同じことを検証する。証明書とlocal credentialのaccountが一致する対象だけを照会対象にする。account-wide certificateを永続複製せず、R18の固定filename/owner/tmpfs/UID0400 helperをorigin-certという限定種別に拡張し、JP VPN内の公式cloudflared `tunnel list --output json`だけへread-only mountする。
+既存wrapperの明示read-only discoveryで、現在のWindows user profileの標準certificateだけを使う。Windows ACLのowner/read boundaryとファイルhashを照合し、WSLで読む内容が同じことを検証する。証明書とlocal credentialのaccountが一致する対象だけを照会対象にする。account-wide certificateを永続複製せず、R18の固定filename/owner/tmpfs/UID0400 helperをorigin-certという限定種別に拡張し、JP VPN内の公式cloudflared `tunnel list --output json --id TARGET`だけへread-only mountする。
 
 実行順はJP正規通信/guard確認→限定CLI照会→reader終了→JP Kill Switch/cleanup/Core不変→秘密を含まない対象metadataのprivate receipt保存。原本証明書やWindows ACLを変更せず、新Token、generic Account API helper、共有broker代替、DNS/Access/Tunnelの変更・run・削除・replica参加を実装しない。既存local credentialと一致しない他Projectのmetadataは保存/表示しない。stdoutは件数/状態だけとし、ID/名前/zoneや原本pathはowner-only receiptに限定。Tunnel用途/zone所有はUNKNOWNのまま、一覧照会成功をTunnel E2Eや利用許可へ昇格しない。
 
 証明書は管理権限を持つため、clientのCLI動詞はlistに固定する。共有cf-account-api契約と区別し、共有Account API利用は既存の正式brokerが確認できるまで保留する。Contabo不使用。根拠: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/tunnel-permissions/ 。
+
+
+R19実装・保留境界（2026-10-31）: 明示`--cloudflare-discover`だけで有効化し、JP以外/backup learning併用/通常Tunnel credential指定は拒否。Windows ACL検証はDocker操作・証明書読取・Provider照会より先。失敗時は既存Windows原本のACLを自動変更せず、VPN/Tunnelも起動しない。ID filterはProvider側へ渡し、想定外resourceは受入拒否。Providerのraw診断もstdoutへ出さない。成功metadataはJP Kill Switch・cleanup・Core/Storage不変の後だけowner-only receiptへ保存し、Cloudflare E2EはNOT_RUNのまま。
+
+現物ACLには本人/SYSTEM/管理者以外にsandbox用途と確認できるlocal group、および名前解決できないSIDの継承ACEがある。後者が現存する他者アカウントであるとは断定しない。許可済み3主体だけという現在の厳格gateとは不一致なので`WINDOWS_ORIGIN_CERT_ACL_UNVERIFIED`で停止した。証明書読取/staging/Provider照会なし。既存sandboxの権限を削除して開発環境を壊す変更は行わない。現段階の残作業は、この権限由来または既存正式brokerの利用権限を確定し、承認された認証経路を選ぶこと。新Token発行・既存ACL変更は未承認で、勝手に実行しない。

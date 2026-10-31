@@ -40,3 +40,4 @@ vpn-bundles/
 # Local Cloudflare tunnel credentials (original and container-owned staging)
 cloudflared.credential
 cloudflared.runtime-token
+cloudflared.runtime-origin-cert

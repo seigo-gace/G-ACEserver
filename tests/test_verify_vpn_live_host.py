@@ -43,5 +43,8 @@ fi
     def test_local_cloudflare_mode_runs_no_live_vpn(self):
         self.assertEqual(self.run_wrapper(('--cloudflare-local',)), (0, []))
 
+    def test_discovery_mode_forces_jp_without_kr_learning(self):
+        self.assertEqual(self.run_wrapper(('--cloudflare-discover',)), (0, ['jp:']))
+
     def test_unknown_arguments_fail_before_testing_or_runtime(self):
         self.assertEqual(self.run_wrapper(('--unknown',)), (2, []))

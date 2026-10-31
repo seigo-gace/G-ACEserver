@@ -13,6 +13,7 @@ import time
 
 import gserver_apps as apps
 import gserver_vpn as vpn
+import gserver_cloudflare_discovery as discovery
 from smoke_gserver_apps_host import docker, inventory, storage, CORE, safe_runtime_error
 
 PROFILE_ROOT = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gserver/vpn-profiles'
@@ -266,6 +267,9 @@ def main():
     profile = PROFILE_ROOT / vpn.REGIONS[region]
     tunnel_cred = os.environ.get('GSERVER_CLOUDFLARED_CREDENTIAL')
     learn_backup = os.environ.get('GSERVER_VPN_LEARN_BACKUP', '')
+    discovery_mode = os.environ.get('GSERVER_CLOUDFLARE_DISCOVERY', '')
+    identity = None
+    pending_receipt = None
     pending_pin = None
     phase = 'PRECHECK'
     failure = None
@@ -275,13 +279,19 @@ def main():
     storage_before = None
     print('========== GACE_RESULT_BEGIN ==========\nPROJECT=Gserver\nACTION=PC_VPN_CLOUDFLARE_LIVE_SMOKE', flush=True)
     print('VPN_REGION=' + region.upper(), flush=True)
-    with tempfile.TemporaryDirectory(prefix='gserver-vpn-live-') as workspace:
+    with tempfile.TemporaryDirectory(prefix='gserver-vpn-live-',
+                                     dir='/dev/shm' if discovery_mode else None) as workspace:
         bundle = Path(workspace) / 'bundle'
         try:
             if tunnel_cred:
                 raise vpn.VPNError('CLOUDFLARE_REQUIRES_SEPARATE_AUTHORIZED_GATE')
             if learn_backup and (region, learn_backup) != ('jp', 'kr'):
                 raise vpn.VPNError('BACKUP_PIN_REGION_INVALID')
+            if discovery_mode:
+                if discovery_mode != '1' or region != 'jp' or learn_backup:
+                    raise vpn.VPNError('CLOUDFLARE_DISCOVERY_MODE_INVALID')
+                # Fail before Docker, copying credentials or provider traffic.
+                identity = discovery.windows_identity()
             projects = docker('ps', '--format', '{{.Label "com.docker.compose.project"}}').splitlines()
             if any(vpn.PROJECT.fullmatch(p.strip()) for p in projects):
                 raise vpn.VPNError('PROTECTED_GROUP_ALREADY_RUNNING')
@@ -298,8 +308,10 @@ def main():
             validate_live_preflight(
                 status,
                 region,
-                require_cloudflared=bool(tunnel_image and tunnel_cred),
+                require_cloudflared=bool(discovery_mode),
             )
+            if discovery_mode and not tunnel_image:
+                raise vpn.VPNError('LOCAL_PINNED_IMAGE_MISSING')
             phase = 'RENDER_BUNDLE'
             manifest = vpn.render(
                 bundle,
@@ -348,6 +360,10 @@ def main():
                 phase = 'BACKUP_ENDPOINT_LOOKUP'
                 pending_pin = backup_endpoint_candidate(app_id, region, learn_backup)
                 print('BACKUP_ENDPOINT_CANDIDATE=' + ('EXISTING_PIN_UNCHANGED' if pending_pin is None else 'VALIDATED_NOT_SAVED'), flush=True)
+            if discovery_mode:
+                phase = 'CLOUDFLARE_DISCOVERY'
+                pending_receipt = discovery.discover(bundle, vpn_id, project, tunnel_image, identity=identity)
+                print('CLOUDFLARE_READ_ONLY_MATCHED_TUNNELS=' + str(len(pending_receipt['tunnels'])), flush=True)
             phase = 'KILL_SWITCH'
             if not tcp_connected(app_id, TCP_CANARY, 443):
                 raise vpn.VPNError('KILL_SWITCH_POSITIVE_CONTROL_FAILED')
@@ -358,7 +374,7 @@ def main():
             assert_vpn_stop_blocks_publicip(app_id)
             unchanged_guard(guard_before, app_guard(app_id))
             print('VPN_KILL_SWITCH_PUBLIC_TCP=PASS', flush=True)
-            print('CLOUDFLARE=NOT_RUN_SEPARATE_AUTHORIZED_GATE', flush=True)
+            print('CLOUDFLARE=' + ('READ_ONLY_DISCOVERY_ONLY' if discovery_mode else 'NOT_RUN_SEPARATE_AUTHORIZED_GATE'), flush=True)
             print('PERFORMANCE=NOT_VERIFIED', flush=True)
         except (apps.AppError, vpn.VPNError, OSError, ValueError, KeyError, TypeError) as exc:
             failure = phase
@@ -389,6 +405,12 @@ def main():
         except (vpn.VPNError, OSError, ValueError, TypeError, KeyError) as exc:
             failure = 'BACKUP_PIN_COMMIT'
             print('LIVE_FAILURE_CODE=' + live_failure_detail(exc), flush=True)
+    if failure is None and pending_receipt is not None:
+        try:
+            discovery.save_receipt(pending_receipt)
+            print('CLOUDFLARE_PRIVATE_METADATA_SAVED_AFTER_CLEANUP=PASS', flush=True)
+        except (vpn.VPNError, OSError, ValueError):
+            failure = 'DISCOVERY_RECEIPT_COMMIT'
     print('ACCEPTANCE_KERNEL_GUARD=NOT_THIS_SCRIPT')
     print('ACCEPTANCE_LIVE_VPN=' + ('FAIL' if failure else 'PASS'))
     print('ACCEPTANCE_CLOUDFLARE=NOT_RUN')
