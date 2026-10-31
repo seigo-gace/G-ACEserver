@@ -120,7 +120,12 @@ class BotSpool:
                 id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 next_attempt INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
-                sent_at INTEGER, last_status TEXT NOT NULL DEFAULT 'queued')""")
+                sent_at INTEGER, last_status TEXT NOT NULL DEFAULT 'queued',
+                lease_generation INTEGER NOT NULL DEFAULT 0)""")
+            # Upgrade an existing persistent spool in-place without dropping rows.
+            columns = {col[1] for col in conn.execute("PRAGMA table_info(events)").fetchall()}
+            if "lease_generation" not in columns:
+                conn.execute("ALTER TABLE events ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0")
             conn.execute("CREATE INDEX IF NOT EXISTS events_ready ON events(state,next_attempt)")
         try:
             os.chmod(self.database, 0o600)
@@ -180,19 +185,22 @@ class BotSpool:
                 "WHERE state='sending' AND next_attempt<=? AND attempts>=?",
                 (now, MAX_ATTEMPTS))
             row = conn.execute(
-                "SELECT id,payload,attempts FROM events WHERE state IN ('pending','sending') "
+                "SELECT id,payload,attempts,lease_generation FROM events WHERE state IN ('pending','sending') "
                 "AND next_attempt<=? AND attempts<? ORDER BY created_at,id LIMIT 1",
                 (now, MAX_ATTEMPTS)).fetchone()
             if not row:
                 return None
-            conn.execute("UPDATE events SET state='sending',next_attempt=?,attempts=attempts+1 WHERE id=?",
+            conn.execute("UPDATE events SET state='sending',next_attempt=?,attempts=attempts+1,"
+                         "lease_generation=lease_generation+1 WHERE id=?",
                          (now + 60, row[0]))
-            return row[0], json.loads(row[1]), row[2] + 1
+            return row[0], json.loads(row[1]), row[2] + 1, row[3] + 1
 
-    def finish(self, key, status, attempts, now=None):
+    def finish(self, key, status, attempts, lease_generation, now=None):
         now = int(time.time() if now is None else now)
         if status not in ("ack", "retry", "blocked"):
             raise BotEventError("BAD_DELIVERY_STATUS")
+        if type(lease_generation) is not int or lease_generation < 1:
+            raise BotEventError("BAD_LEASE_GENERATION")
         state = "sent" if status == "ack" else ("blocked" if status == "blocked" or attempts >= MAX_ATTEMPTS else "pending")
         delay = min(3600, 15 * 2 ** min(attempts, 8))
         with contextlib.closing(self.connect()) as conn, conn:
@@ -200,9 +208,10 @@ class BotSpool:
             # Only the current lease generation may finish an event. A late
             # ACK from a previous attempt must not overwrite its successor.
             changed = conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? "
-                                   "WHERE id=? AND state='sending' AND attempts=?",
+                                   "WHERE id=? AND state='sending' AND attempts=? AND lease_generation=?",
                                    (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
-                                    status if state != "blocked" else "requires_operator", key, attempts)).rowcount
+                                    status if state != "blocked" else "requires_operator", key, attempts,
+                                    lease_generation)).rowcount
             # Retain successful receipts for 7 days to deduplicate replays.
             conn.execute("DELETE FROM events WHERE state='sent' AND sent_at<?", (now - 7 * 86400,))
             # A bounded retention window is necessary on a small owner PC.
@@ -344,7 +353,7 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
         claimed = spool.claim()
         if claimed is None:
             break
-        key, payload, attempts = claimed
+        key, payload, attempts, generation = claimed
         try:
             result = sender(payload, url, token)
         except Exception:
@@ -355,6 +364,6 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
             result = "retry"
         # A timed-out worker can finish after another worker has reclaimed
         # this event. Never report a stale ACK as a durable spool transition.
-        if spool.finish(key, result, attempts):
+        if spool.finish(key, result, attempts, generation):
             done["sent" if result == "ack" else result] += 1
     return done
