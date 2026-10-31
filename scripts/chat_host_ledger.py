@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import re
 
 class ReplayDenied(ValueError):
     pass
@@ -23,12 +24,12 @@ class RequestLedger:
 
     def claim(self, request_id: str, fingerprint: str) -> bool:
         """True only for a newly durably claimed request; repeated IDs fail closed."""
-        if not isinstance(request_id, str) or not request_id.startswith("req_"):
+        if not isinstance(request_id, str) or not re.fullmatch(r"req_[a-z0-9]{12,40}", request_id):
             raise ReplayDenied("REQUEST_ID_INVALID")
         if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(c not in "0123456789abcdef" for c in fingerprint):
             raise ReplayDenied("FINGERPRINT_INVALID")
         path = self.db_path
-        if not isinstance(path, Path) or path.is_symlink() or not path.parent.is_dir():
+        if not isinstance(path, Path) or path.is_symlink() or path.parent.is_symlink() or not path.parent.is_dir():
             raise ReplayDenied("LEDGER_PATH_INVALID")
         if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
             raise ReplayDenied("LEDGER_FILE_INVALID")
