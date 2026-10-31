@@ -47,3 +47,7 @@ The probe checks two simultaneous apps; stop isolation; stop/start persistence; 
 | Core/Storage failure | Existing `scripts/gserverctl.py`, Core release ledger | Existing Core recovery; do not replace with app configuration |
 | PC probe failed | `scripts/smoke_gserver_apps_host.py`, result phase | Resolve exact phase; disposable resources cleaned; no Core reinstall |
 | Windows reboot loses services | F01/F06, S2-04 | Inspect existing Windows/WSL/Docker startup before any Host changes |
+
+## Independent app lifecycle acceptance (Composer PR #18 integration)
+
+The original PC smoke demonstrated two independent app projects, stop isolation, persistent state and config rollback without changing Core/Storage. Reuse the existing `scripts/demo_independent_app_lifecycle.sh` only for an explicit repeatable owner-PC validation after any runtime integration. `restart` first restarts the app project without `compose down`, then waits for readiness via the existing immutable-image `up --no-build --pull never` operation. Stop/start and rollback retain named volumes. This integration preserves PR #15's safe logging and successful-probe diagnostic, rather than replacing them with the older PR #18 versions.
