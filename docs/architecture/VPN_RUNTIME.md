@@ -88,3 +88,15 @@ Cloudflare ingressは別Gate。以前の任意credential投入では本番Tunnel
 Gluetun v3.41.3は起動時に`/etc/passwd`へ書くためVPNサービスだけread_onlyを解除している。app/cloudflaredのread_only、capability制限、guardは維持。appはCore imageをPython実行体として再利用し、Coreのhealthcheck/Workerは起動しない。DNS Configは`app-resolv.conf`をfile方式で適用し、UID65534で実読取を検査する。失敗時はcleanup前のState/Health/秘匿診断を取得する。
 
 公式根拠: [Cloudflare /cdn-cgi endpoint](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)、[WireGuard tools wg manual](https://git.zx2c4.com/wireguard-tools/tree/src/man/wg.8)。
+
+## JP/KRの順次実機受入（R17）
+
+JP単独の隔離実機試験はMaster返却でPASS（2026-10-31、Source0b970cb）。対象は実HTTPS/JP出口/kernel WG通信、Docker DNS UDP/TCP遮断、IPv6無効化とpublic接続拒否、VPN停止後public TCP Kill Switch、Core/Storage不変。Handshake時刻は未収集、性能/復旧/CloudflareとF01〜F08の総合受入は別。
+
+KR pin未設定は手元Hostのpublic DNSで解決しない。既存wrapperの明示`--both`でJP内のVPN resolverからKR profile Endpointのpublic IPv4を取得する。既存KR pinは上書きしない。候補はメモリに保持し、JPの安全試験/cleanup/Core不変が全成功した後にprofile hash/cache不変を再照合し、既存owner-only cacheへ保存する。失敗時は保存せずKRも実行しない。JPをdownした後だけKRを新しいguard付きnamespaceで起動し、同じ安全Gateを実施する。開始時にgace-vpn groupの稼働containerがあれば採用や停止をせず拒否する。
+
+```bash
+GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --both
+```
+
+この順次試験の成功を自動failover/本番常時稼働/速度合格と扱わない。KR実機結果を取得するまではKRは未受入。新しいVPN鍵・パッケージ・image・定期実行を追加しない。

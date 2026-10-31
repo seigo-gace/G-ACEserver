@@ -156,6 +156,50 @@ def verify_network_guards(container):
         raise vpn.VPNError('IPV6_NOT_BLOCKED')
 
 
+def backup_endpoint_candidate(container, region, backup_region):
+    """Resolve only the profile-owned backup peer, inside the already guarded app."""
+    if (region, backup_region) != ('jp', 'kr'):
+        raise vpn.VPNError('BACKUP_PIN_REGION_INVALID')
+    pins = vpn.endpoint_pins()
+    if backup_region in pins:
+        return None
+    data = vpn.profile(PROFILE_ROOT / vpn.REGIONS[backup_region], backup_region)
+    hostname = data['endpoint']
+    try:
+        literal = ipaddress.ip_address(hostname)
+        addresses = [str(literal)]
+    except ValueError:
+        result = app_json(container,
+            "import json,os,socket\n"
+            "addresses=sorted({r[4][0] for r in socket.getaddrinfo(" + repr(hostname) + ",None,socket.AF_INET,socket.SOCK_DGRAM)})\n"
+            "print(json.dumps({'uid':os.getuid(),'addresses':addresses}))\n")
+        if result.get('uid') != 65534:
+            raise vpn.VPNError('BACKUP_DNS_REPORT_INVALID')
+        addresses = result.get('addresses')
+    try:
+        if not isinstance(addresses, list) or not 1 <= len(addresses) <= 16:
+            raise ValueError()
+        parsed = [ipaddress.ip_address(value) for value in addresses if isinstance(value, str)]
+        if len(parsed) != len(addresses) or any(v.version != 4 or not v.is_global for v in parsed):
+            raise ValueError()
+    except (ValueError, TypeError) as exc:
+        raise vpn.VPNError('BACKUP_DNS_REPORT_INVALID') from exc
+    return {'region': backup_region, 'address': str(min(parsed, key=int)),
+            'profile_sha256': data['sha256'], 'original_pins': pins}
+
+
+def commit_backup_endpoint(candidate):
+    """Called only after successful VPN checks, cleanup and unchanged Core readback."""
+    if candidate is None:
+        return False
+    region = candidate['region']
+    current = vpn.profile(PROFILE_ROOT / vpn.REGIONS[region], region)
+    if current['sha256'] != candidate['profile_sha256'] or vpn.endpoint_pins() != candidate['original_pins']:
+        raise vpn.VPNError('BACKUP_PIN_INPUT_CHANGED')
+    vpn.write_endpoint_pin(region, candidate['address'])
+    return True
+
+
 def service_container(project, service):
     ids = docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + project,
                  '--filter', 'label=com.docker.compose.service=' + service).split()
@@ -221,6 +265,8 @@ def main():
         raise SystemExit('GSERVER_VPN_REGION must be jp or kr')
     profile = PROFILE_ROOT / vpn.REGIONS[region]
     tunnel_cred = os.environ.get('GSERVER_CLOUDFLARED_CREDENTIAL')
+    learn_backup = os.environ.get('GSERVER_VPN_LEARN_BACKUP', '')
+    pending_pin = None
     phase = 'PRECHECK'
     failure = None
     created = False
@@ -228,11 +274,17 @@ def main():
     before = None
     storage_before = None
     print('========== GACE_RESULT_BEGIN ==========\nPROJECT=Gserver\nACTION=PC_VPN_CLOUDFLARE_LIVE_SMOKE', flush=True)
+    print('VPN_REGION=' + region.upper(), flush=True)
     with tempfile.TemporaryDirectory(prefix='gserver-vpn-live-') as workspace:
         bundle = Path(workspace) / 'bundle'
         try:
             if tunnel_cred:
                 raise vpn.VPNError('CLOUDFLARE_REQUIRES_SEPARATE_AUTHORIZED_GATE')
+            if learn_backup and (region, learn_backup) != ('jp', 'kr'):
+                raise vpn.VPNError('BACKUP_PIN_REGION_INVALID')
+            projects = docker('ps', '--format', '{{.Label "com.docker.compose.project"}}').splitlines()
+            if any(vpn.PROJECT.fullmatch(p.strip()) for p in projects):
+                raise vpn.VPNError('PROTECTED_GROUP_ALREADY_RUNNING')
             before = inventory()
             info = json.loads(docker('inspect', CORE))[0]
             if info['State'].get('Health', {}).get('Status') != 'healthy':
@@ -292,6 +344,10 @@ def main():
             verify_network_guards(app_id)
             print('DOCKER_EMBEDDED_DNS_UDP_TCP_BLOCKED=PASS', flush=True)
             print('IPV6_DISABLED_AND_PUBLIC_CONNECT_BLOCKED=PASS', flush=True)
+            if learn_backup:
+                phase = 'BACKUP_ENDPOINT_LOOKUP'
+                pending_pin = backup_endpoint_candidate(app_id, region, learn_backup)
+                print('BACKUP_ENDPOINT_CANDIDATE=' + ('EXISTING_PIN_UNCHANGED' if pending_pin is None else 'VALIDATED_NOT_SAVED'), flush=True)
             phase = 'KILL_SWITCH'
             if not tcp_connected(app_id, TCP_CANARY, 443):
                 raise vpn.VPNError('KILL_SWITCH_POSITIVE_CONTROL_FAILED')
@@ -326,6 +382,13 @@ def main():
                     print('CORE_STORAGE_OTHER_CONTAINERS_UNCHANGED=PASS', flush=True)
                 except (apps.AppError, vpn.VPNError, ValueError, KeyError):
                     failure = failure or 'EXISTING_CONTAINER_READBACK'
+    if failure is None and pending_pin is not None:
+        try:
+            commit_backup_endpoint(pending_pin)
+            print('BACKUP_ENDPOINT_PIN_KR=SAVED_PRIVATE_AFTER_CLEANUP', flush=True)
+        except (vpn.VPNError, OSError, ValueError, TypeError, KeyError) as exc:
+            failure = 'BACKUP_PIN_COMMIT'
+            print('LIVE_FAILURE_CODE=' + live_failure_detail(exc), flush=True)
     print('ACCEPTANCE_KERNEL_GUARD=NOT_THIS_SCRIPT')
     print('ACCEPTANCE_LIVE_VPN=' + ('FAIL' if failure else 'PASS'))
     print('ACCEPTANCE_CLOUDFLARE=NOT_RUN')

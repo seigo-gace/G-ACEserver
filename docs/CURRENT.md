@@ -2,7 +2,8 @@
 
 - **Master実機 / Source 0b970cb:** wrapper74 tests PASS。APP_RESOLV_CONF_APPLIED、APP_DNS_VPN_NAMESERVER、実HTTPS/名前解決、日本出口JP、kernel WireGuard通信、Docker DNS UDP/TCP drop、IPv6無効化/public接続拒否、VPN停止後public TCP Kill Switch、Core/Storage/他container不変のすべてPASS。ACCEPTANCE_LIVE_VPN=PASS、VERIFY=PASS、ERROR=NONE、exit0。これは隔離JP試験の範囲に限定した受入。
 - **別Gate維持:** Handshake時刻NOT_COLLECTED。HTTPS0.517/0.692秒は少数サンプルでありPERFORMANCE NOT_VERIFIED。Cloudflare NOT_RUN。KR、切替/復旧/安定性、媒体/Vault、F01〜F08の総合受入は未完了。Draft維持。
-- **Next:** KR pin未設定を、受入済みJP VPN内のresolver経由で安全に補完する順次受入を準備する。Host DNSの直接bootstrapなし、JP cleanup完了前のKR起動なし、既存pinを上書きしない。設計R17に従う。
+- **Source追加:** 明示`verify_vpn_live_host.sh --both`で、JP内のVPN resolverによるKR pin候補取得→JP Kill Switch/cleanup/Core不変→profile/cache再照合・owner-only保存→KR新namespace試験を順次実行する。既存pin変更なし、Host DNSなし、失敗時KR実行なし。gace-vpn groupの既存稼働containerは停止/採用せず拒否。重点86 tests PASS（DNS候補拒否/競合、保存順序、cleanup失敗、shell順次停止を含む）。確定Sourceの全回帰308 tests PASS、shell構文/diff check PASS、CI NOT_RUN。
+- **Next:** 同じWSL端末で `GSERVER_CLOUDFLARED_CREDENTIAL= bash "$HOME/Project/Gserver/repository/scripts/verify_vpn_live_host.sh" --both`。本人sudo認証がCodexシェルへ共有されないため実機実行のみMasterへ依頼。KR受入、切替/復旧/性能・Cloudflareはまだ未合格。
 
 ---
 

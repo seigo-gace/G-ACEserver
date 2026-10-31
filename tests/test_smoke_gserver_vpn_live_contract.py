@@ -279,10 +279,11 @@ class RealNetworkEvidence(unittest.TestCase):
 
 
 class LiveLifecycleEvidence(unittest.TestCase):
-    def exercise(self, *, tcp=(True,False), transfer=True, https_fail=False):
+    def exercise(self, *, tcp=(True,False), transfer=True, https_fail=False, cleanup_fail=False):
         import contextlib,io
         report={'inode':10,'nft':{'nftables':[]}}
         def docker(*args):
+            if cleanup_fail and 'down' in args: raise live.apps.AppError('CLEANUP_FAILED')
             if args[0]=='inspect': return '[{"State":{"Health":{"Status":"healthy"}}}]'
             return ''
         output=io.StringIO()
@@ -337,6 +338,95 @@ class LiveLifecycleEvidence(unittest.TestCase):
                 code,output,_=self.exercise(**kwargs)
                 self.assertEqual(code,1)
                 self.assertNotIn('WIREGUARD_CONNECTION=PASS',output)
+
+
+class BackupEndpointTests(unittest.TestCase):
+    def data(self, endpoint='backup.example.com'):
+        return {'endpoint':endpoint,'sha256':'profile-v1'}
+
+    def test_missing_pin_resolves_only_in_guarded_app(self):
+        with mock.patch.object(live.vpn,'endpoint_pins',return_value={'jp':'1.1.1.1'}), \
+             mock.patch.object(live.vpn,'profile',return_value=self.data()), \
+             mock.patch.object(live,'app_json',return_value={'uid':65534,'addresses':['8.8.8.8','1.1.1.1']}) as probe, \
+             mock.patch('socket.getaddrinfo',side_effect=AssertionError('Host DNS forbidden')):
+            candidate=live.backup_endpoint_candidate('app','jp','kr')
+        self.assertEqual(candidate['address'],'1.1.1.1')
+        self.assertEqual(candidate['region'],'kr')
+        self.assertEqual(probe.call_args.args[0],'app')
+        compile(probe.call_args.args[1],'<protected-dns>','exec')
+        self.assertIn('socket.AF_INET',probe.call_args.args[1])
+
+    def test_existing_pin_never_resolves_or_changes(self):
+        with mock.patch.object(live.vpn,'endpoint_pins',return_value={'kr':'1.1.1.1'}), \
+             mock.patch.object(live.vpn,'profile') as profile, mock.patch.object(live,'app_json') as probe:
+            self.assertIsNone(live.backup_endpoint_candidate('app','jp','kr'))
+        profile.assert_not_called();probe.assert_not_called()
+
+    def test_private_mixed_ipv6_empty_and_excessive_answers_are_rejected(self):
+        for addresses in ([],None,['127.0.0.1'],['1.1.1.1','10.0.0.1'],['2606:4700::1111'],[42],['1.1.1.1']*17):
+            with self.subTest(addresses=addresses),mock.patch.object(live.vpn,'endpoint_pins',return_value={}), \
+                 mock.patch.object(live.vpn,'profile',return_value=self.data()), \
+                 mock.patch.object(live,'app_json',return_value={'uid':65534,'addresses':addresses}):
+                with self.assertRaisesRegex(vpn.VPNError,'BACKUP_DNS_REPORT_INVALID'):
+                    live.backup_endpoint_candidate('app','jp','kr')
+
+    def test_literal_needs_no_resolution_and_wrong_region_is_rejected(self):
+        with mock.patch.object(live.vpn,'endpoint_pins',return_value={}), \
+             mock.patch.object(live.vpn,'profile',return_value=self.data('1.1.1.1')),mock.patch.object(live,'app_json') as probe:
+            self.assertEqual(live.backup_endpoint_candidate('app','jp','kr')['address'],'1.1.1.1')
+            with self.assertRaisesRegex(vpn.VPNError,'BACKUP_PIN_REGION_INVALID'):
+                live.backup_endpoint_candidate('app','kr','jp')
+        probe.assert_not_called()
+
+    def test_pin_commit_revalidates_profile_and_cache(self):
+        candidate={'region':'kr','address':'1.1.1.1','profile_sha256':'profile-v1','original_pins':{'jp':'8.8.8.8'}}
+        for profile,pins,accepted in ((self.data(),{'jp':'8.8.8.8'},True),
+                                     ({'sha256':'changed'},{'jp':'8.8.8.8'},False),
+                                     (self.data(),{'jp':'8.8.8.8','kr':'9.9.9.9'},False)):
+            with self.subTest(accepted=accepted),mock.patch.object(live.vpn,'profile',return_value=profile), \
+                 mock.patch.object(live.vpn,'endpoint_pins',return_value=pins),mock.patch.object(live.vpn,'write_endpoint_pin') as write:
+                if accepted:
+                    self.assertTrue(live.commit_backup_endpoint(candidate))
+                    write.assert_called_once_with('kr','1.1.1.1')
+                else:
+                    with self.assertRaisesRegex(vpn.VPNError,'BACKUP_PIN_INPUT_CHANGED'):
+                        live.commit_backup_endpoint(candidate)
+                    write.assert_not_called()
+
+    def test_active_protected_group_is_refused_without_adoption(self):
+        import contextlib,io
+        with mock.patch.dict(live.os.environ,{'GSERVER_VPN_REGION':'jp','GSERVER_CLOUDFLARED_CREDENTIAL':'','GSERVER_VPN_LEARN_BACKUP':''}), \
+             mock.patch.object(live,'docker',return_value='gace-vpn-'+'a'*16) as command, \
+             mock.patch.object(live,'inventory') as inventory,contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(live.main(),1)
+        inventory.assert_not_called()
+        self.assertEqual(command.call_count,1)
+        self.assertIn('PROTECTED_GROUP_ALREADY_RUNNING',out.getvalue())
+
+    def test_pin_is_never_saved_after_leak_cleanup_failure_or_egress_failure(self):
+        fixture=LiveLifecycleEvidence()
+        for kwargs in ({'tcp':[True,True]},{'cleanup_fail':True},{'https_fail':True}):
+            with self.subTest(kwargs=kwargs),mock.patch.dict(live.os.environ,{'GSERVER_VPN_LEARN_BACKUP':'kr'}), \
+                 mock.patch.object(live,'backup_endpoint_candidate',return_value={'candidate':'private'}), \
+                 mock.patch.object(live,'commit_backup_endpoint') as write:
+                result,_,_=fixture.exercise(**kwargs)
+                self.assertEqual(result,1)
+                write.assert_not_called()
+
+    def test_pin_commit_follows_cleanup_and_invariant_readback(self):
+        fixture=LiveLifecycleEvidence()
+        def save(candidate):
+            self.assertTrue(any('down' in c.args for c in live.docker.call_args_list))
+            self.assertEqual(live.inventory.call_count,2)
+            self.assertEqual(live.storage.call_count,2)
+            return True
+        with mock.patch.dict(live.os.environ,{'GSERVER_VPN_LEARN_BACKUP':'kr'}), \
+             mock.patch.object(live,'backup_endpoint_candidate',return_value={'candidate':'private'}), \
+             mock.patch.object(live,'commit_backup_endpoint',side_effect=save) as write:
+            result,output,_=fixture.exercise()
+        self.assertEqual(result,0)
+        write.assert_called_once_with({'candidate':'private'})
+        self.assertIn('SAVED_PRIVATE_AFTER_CLEANUP',output)
 
 
 if __name__ == '__main__':
