@@ -22,11 +22,11 @@ class CheckoutTests(TestCase):
     @mock.patch("chat_host_checkout.subprocess.run")
     def test_head(self, run):
         run.side_effect = self.fake
-        self.assertTrue(observe_owned_checkout(self.root, expected_sha=SHA, command_id="project.git_head")["head_matches"])
+        self.assertTrue(observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="project.git_head")["head_matches"])
     @mock.patch("chat_host_checkout.subprocess.run")
     def test_clean(self, run):
         run.side_effect = self.fake
-        self.assertTrue(observe_owned_checkout(self.root, expected_sha=SHA, command_id="project.git_status")["worktree_clean"])
+        self.assertTrue(observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="project.git_status")["worktree_clean"])
     @mock.patch("chat_host_checkout.subprocess.run")
     def test_dirty(self, run):
         def f(args, **kwargs):
@@ -34,7 +34,7 @@ class CheckoutTests(TestCase):
                 return CompletedProcess(args, 0, " M private-file")
             return self.fake(args, **kwargs)
         run.side_effect = f
-        self.assertFalse(observe_owned_checkout(self.root, expected_sha=SHA, command_id="project.git_status")["worktree_clean"])
+        self.assertFalse(observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="project.git_status")["worktree_clean"])
     @mock.patch("chat_host_checkout.subprocess.run")
     def test_sha_mismatch(self, run):
         def f(args, **kwargs):
@@ -44,18 +44,28 @@ class CheckoutTests(TestCase):
             return v
         run.side_effect = f
         with self.assertRaises(AdmissionDenied):
-            observe_owned_checkout(self.root, expected_sha=SHA, command_id="project.git_head")
+            observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="project.git_head")
     @mock.patch("chat_host_checkout.subprocess.run")
     def test_timeout(self, run):
         run.side_effect = TimeoutExpired("git", 5)
         with self.assertRaises(AdmissionDenied):
-            observe_owned_checkout(self.root, expected_sha=SHA, command_id="project.git_head")
+            observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="project.git_head")
     def test_unknown_command(self):
         with self.assertRaises(AdmissionDenied):
-            observe_owned_checkout(self.root, expected_sha=SHA, command_id="host.command")
+            observe_owned_checkout(self.root, registered_root=self.root, expected_sha=SHA, command_id="host.command")
     def test_invalid_sha(self):
         with self.assertRaises(AdmissionDenied):
-            observe_owned_checkout(self.root, expected_sha="INVALID", command_id="project.git_head")
+            observe_owned_checkout(self.root, registered_root=self.root, expected_sha="INVALID", command_id="project.git_head")
     def test_missing_checkout(self):
         with self.assertRaises(AdmissionDenied):
-            observe_owned_checkout(self.root / "missing", expected_sha=SHA, command_id="project.git_head")
+            observe_owned_checkout(self.root / "missing", registered_root=self.root, expected_sha=SHA, command_id="project.git_head")
+
+    def test_foreign_checkout_same_sha_denied(self):
+        with TemporaryDirectory() as other:
+            with self.assertRaises(AdmissionDenied):
+                observe_owned_checkout(Path(other), registered_root=self.root,
+                                       expected_sha=SHA, command_id="project.git_head")
+    def test_missing_registered_root_denied(self):
+        with self.assertRaises(AdmissionDenied):
+            observe_owned_checkout(self.root, registered_root=self.root / "none",
+                                   expected_sha=SHA, command_id="project.git_head")
