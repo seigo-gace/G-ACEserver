@@ -30,12 +30,12 @@ def validate_read_only_request(request: dict, *, expected_cu: str, expected_sha:
     if (not isinstance(request["change_unit"], str) or not CU.fullmatch(request["change_unit"])
             or request["change_unit"] != expected_cu):
         raise AdmissionDenied("CHANGE_UNIT_MISMATCH")
-    if request["effect"] != "read_only" or request["command_id"] not in COMMANDS:
+    if (not isinstance(request["effect"], str) or request["effect"] != "read_only"\n            or not isinstance(request["command_id"], str) or request["command_id"] not in COMMANDS):
         raise AdmissionDenied("COMMAND_NOT_ADMITTED")
     if (not isinstance(request["source_sha"], str) or not SHA.fullmatch(request["source_sha"])
             or request["source_sha"] != expected_sha):
         raise AdmissionDenied("SOURCE_SHA_MISMATCH")
-    if not isinstance(request["issued_at"], str) or now.tzinfo is None:
+    if not isinstance(request["issued_at"], str) or not isinstance(now, datetime) or now.tzinfo is None:
         raise AdmissionDenied("TIME_INVALID")
     try:
         issued = datetime.fromisoformat(request["issued_at"].replace("Z", "+00:00"))
