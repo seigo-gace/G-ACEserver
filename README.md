@@ -6,6 +6,10 @@ Gserver is a general-purpose Docker/Compose server on the owner's Windows PC / W
 
 The existing Core and Storage remain running. [PR #15](https://github.com/seigo-gace/G-ACEserver/pull/15) adds the independent app CLI; see [app operation and acceptance](docs/architecture/APPS_RUNTIME.md) and [current evidence](docs/CURRENT.md). Management uses the existing VS Code/Cursor WSL terminal. The full [F01–F08 acceptance](docs/requirements/FINAL_ACCEPTANCE.md) remains open.
 
+## Workspace / server-core
+
+The existing server-core is also the local workspace command center. [Workspace integration](docs/architecture/WORKSPACE_SERVERCORE.md) tracks the existing ServerTerminal and GitHub Project Agent Loop continuation. `python3 -B scripts/gserver_workspace.py` verifies the local workspace wiring; explicit `--install` creates missing files and refuses conflicting existing files. Layout verification does not establish client rule loading or remote Host admission.
+
 ## Start here
 
 1. Read [`AGENTS.md`](AGENTS.md) for bounded Codex/AI execution and existing G-ACE rules.

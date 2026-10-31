@@ -1,3 +1,5 @@
+> **2026-10-31 Master追加委任:** Gserverにもserver-core司令室のWorkspaceと既存ServerTerminal/Agent Loop接続を用意する。[採用構成・優先順位](docs/architecture/WORKSPACE_SERVERCORE.md)。同一upstreamのlocal checkoutと既存Current/Ruleを再利用し、別指令室/新規常駐AIを作らない。Contabo統合の調査は今回対象だが、共有稼働/他Projectの変更許可と混同しない。SERVER_AI #16維持、既存Control #10のGserver CUを引き継ぐ。
+
 # G-ACEserver｜Codex 実行入口
 > **2026-10-31 最新:** D側WSL ext4の既存作業領域を編集元とする（G側旧copyは保持、二重編集禁止）。[通信保護引継ぎv3](docs/handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md#9-codex再レビュー採用修正-v32026-10-31実装に先行)を適用。対象appとcloudflared双方のVPN経由・IP秘匿・既存防御維持・速度/復旧は必須受入。ローカルCore確認と外部通信保護完成は別判定。Contabo不使用、他app/共有提供元の変更なし。
 > **2026-10-30 最新目的:** 下記「Master最新優先」と `docs/CURRENT.md` 冒頭を優先。汎用アプリ運用を完成させる。旧引継ぎのBot/TGS先行・古い実機状態は現行指示ではない。

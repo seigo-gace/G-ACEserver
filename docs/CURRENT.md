@@ -1,3 +1,14 @@
+# 2026-10-31 Codex｜Master追加委任：server-core Workspace / 共通Terminal / Agent Loop
+
+- **追加要件:** Gserverでもserver-coreを司令室に全開発をWorkspace内で扱い、既存ServerTerminalからContabo/Gserverを区別して操作、GitHub Projectの既存Agent Loop/Ruleを再利用する。[採用設計](architecture/WORKSPACE_SERVERCORE.md)。VPN/Cloudflare・F01〜F08を縮小しない。今回の統合調査に限りContaboも対象、無関係なVPSサービスの変更許可ではない。
+- **途中成果復元:** Control #10の2026-10-31コメント6535887127/6536859483に同じGserver Terminal CUがある。既存routeのHost root/destinationはVPS固定、Gserver未登録。単なるWSL path追加でPCへ届くとはしない。P015既存登録/Topicを作り直さず、Gateway/Vault正式契約→PC Producer E2E→Gserver Terminal E2Eという既存依存順を維持。Source writerを二重化しない。
+- **実装・local実測:** 同一upstream server-core c688961d29a7485c9a4d949a95c1991a452c7ec8のlocal checkoutを取得（別fork/別指令室ではない）。所有helper expected_workspaceを再利用する薄いadapterを追加し、server-core先頭/既存Projects rootを参照するWorkspaceと最小入口を生成（core側VPS path用のlocal adapterを含む4file）。local install/読戻しPASS、shared checkout tracked差分なし。元データ移動、MCP/token/AI/model変更、VPS/Gateway本番変更なし。
+- **検証:** 新規adapterの10 tests PASS（origin/dirty Source拒否、path alias拒否、既存設定保護、同一fileへの冪等性、途中失敗と並行置換保護、配置PASSと遠隔権限の分離）。local install/読戻しPASS、diff check PASS。VPN/Cloudflare Sourceはこの追加作業で変更していない。
+- **未受入:** Native Cursor/VS Codeの実Rule読込、GitHub Project登録/Current復元の実client動作、Contabo経路の今回live readback、Gserver Receiver/Writer/Sink・遠隔操作、Agent Loopの実継続/復旧はNOT_VERIFIED。配置PASSで移植完成とはしない。Cloudflare既存認証Gate/性能/復旧も未完了。
+- **継続順:** Workspace入口→VPN/Cloudflare正式認証/到達性→P015/Gateway/Vault/PC Producer→既存共通TerminalのHost target分離とGserver実行・結果相関→Contabo回帰/誤認証/SHA/二重配送/offline/復旧。提供元Source/Runtime変更の具体案は元CU/Ownerと照合してから実行する。
+
+---
+
 # 2026-10-31 Codex｜Cloudflare offline実機PASS・限定照会Source・認証Gate保留
 
 - **実機証拠維持:** Master返却のoffline image auditはSource e4e7356、重点96 tests、cloudflared 2026.10.7/native UID65534/token-file/合成private secret読取/network none/既存container不変PASS。実credential不使用、Provider操作なし。JP/KR実通信・DNS/IPv6・Kill Switchの既存PASSも維持する。Cloudflare E2E/性能/常時復旧/F01〜F08総合は未完了。
