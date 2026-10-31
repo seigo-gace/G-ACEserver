@@ -1,3 +1,13 @@
+# 2026-10-31 Codex｜Cloudflare local image/秘密供給の実機PASS・Windows既存credential発見
+
+- **Master実機 / Source e4e7356:** wrapper96 tests PASS。local cloudflared version2026.10.7、UID65534 native実行、token-file対応、private tmpfs staging→Compose secrets UID読取、既存container不変がPASS。network none、実credential不使用、Provider操作なし。VERIFY=PASS/ERROR=NONE/exit0。Cloudflare E2Eは引き続きNOT_RUN。
+- **既存設定の発見:** Windowsの現在user用標準cloudflared directoryにlocal-managed Tunnel credential JSONとorigin certがある。JSONの必須field/filename対応、certとJSONのaccount一致を値非表示で確認。標準config.yml/yamlはなし。Windows cloudflared service metadata照会は0件（service不在でありProvider上のTunnelや手動process不存在の証拠ではない）。原本の変更/credential複製/Provider送信はしていない。実パス・ID・Secretはpublic Currentへ書かない。
+- **契約差:** 発見したものはlocal-managed JSON/origin certificateで、今回Source対応したremotely-managed token-fileと同じ形式ではない。自動変換/新Token発行/用途未確認Tunnelへのreplica参加はしない。旧Astera Gatewayとの接続成功をGserverの利用権限に流用しない。
+- **Next gate:** Windows既存origin certificateの正式利用境界と対象Tunnel/zone/稼働routeをread-onlyで照合する方式を確定する。必要ならJP VPN内の公式cloudflared CLIで限定的resource discoveryを行い、source認証原本とCF設定を保護する。用途/所有zone/影響が確定するまで実Tunnel起動やDNS/Access変更をしない。共有Account brokerはローカル未利用、Contabo経路に迂回しない。JP/KR隔離PASSは維持、性能/自動復旧/媒体/Vault/F01〜F08総合は未完了。
+- **記録制約:** 前回のIssue #9追記は自動承認reviewの利用上限で未実行だった。Sourceと先行Currentはe4e7356へpush済み。この更新は最新実機返却と限定read-only調査の記録。
+
+---
+
 # 2026-10-31 Codex｜JP→KR順次実機PASS・Cloudflareへ継続
 
 - **Master実機 / Source2822b2f:** wrapper86 tests PASS。JPは実HTTPS/JP出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。JP内でKR candidateを取得しJP cleanup・不変確認後にprivate pinを保存、KRを新namespaceで起動。KRも実HTTPS/KR出口/kernel WG/DNS UDP-TCP遮断/IPv6/Kill Switch/Core不変PASS。両方VERIFY=PASS/ERROR=NONE/exit0。実IP/鍵/hostnameは公開しない。
