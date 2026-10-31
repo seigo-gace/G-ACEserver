@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 from chat_host_admission import AdmissionDenied
 
-def observe_owned_checkout(checkout: Path, *, expected_sha: str, command_id: str) -> dict:
+def observe_owned_checkout(checkout: Path, *, registered_root: Path, expected_sha: str, command_id: str) -> dict:
     """Return bounded metadata, never names, stdout, secrets or private paths."""
     if command_id not in ("project.git_head", "project.git_status"):
         raise AdmissionDenied("COMMAND_NOT_ADMITTED")
@@ -15,7 +15,11 @@ def observe_owned_checkout(checkout: Path, *, expected_sha: str, command_id: str
         raise AdmissionDenied("EXPECTED_SHA_INVALID")
     if not isinstance(checkout, Path) or checkout.is_symlink() or not checkout.is_dir():
         raise AdmissionDenied("CHECKOUT_INVALID")
+    if not isinstance(registered_root, Path) or registered_root.is_symlink() or not registered_root.is_dir():
+        raise AdmissionDenied("REGISTERED_ROOT_INVALID")
     root = checkout.resolve(strict=True)
+    if root != registered_root.resolve(strict=True):
+        raise AdmissionDenied("CHECKOUT_NOT_REGISTERED")
     def git(*args):
         try:
             result = subprocess.run(
