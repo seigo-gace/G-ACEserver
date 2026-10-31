@@ -225,10 +225,21 @@ def gateway_endpoint(url):
 
 
 def gateway_token(path):
-    file = Path(path)
-    if not file.is_file() or file.is_symlink() or file.stat().st_size > 4096:
-        raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE")
-    token = file.read_bytes().strip()
+    # The Gateway bearer is an owner-only secret. Validate the opened inode,
+    # not a pathname which could be replaced between is_file() and read().
+    try:
+        fd = os.open(Path(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE") from None
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.geteuid() or info.st_mode & 0o077
+                or not 24 <= info.st_size <= 4096):
+            raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE")
+        token = os.read(fd, 4097).strip()
+    finally:
+        os.close(fd)
     if not 24 <= len(token) <= 4096 or any(ch <= 32 or ch >= 127 for ch in token):
         raise BotEventError("GATEWAY_TOKEN_INVALID")
     return token.decode("ascii")
