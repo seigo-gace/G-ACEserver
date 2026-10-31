@@ -9,7 +9,7 @@ from chat_host_admission import AdmissionDenied
 
 def observe_owned_checkout(checkout: Path, *, registered_root: Path, expected_sha: str, command_id: str) -> dict:
     """Return bounded metadata, never names, stdout, secrets or private paths."""
-    if command_id not in ("project.git_head", "project.git_status"):
+    if not isinstance(command_id, str) or command_id not in ("project.git_head", "project.git_status"):
         raise AdmissionDenied("COMMAND_NOT_ADMITTED")
     if not isinstance(expected_sha, str) or len(expected_sha) != 40 or any(c not in "0123456789abcdef" for c in expected_sha):
         raise AdmissionDenied("EXPECTED_SHA_INVALID")
@@ -35,7 +35,10 @@ def observe_owned_checkout(checkout: Path, *, registered_root: Path, expected_sh
         if result.returncode or len(result.stdout) > 65536:
             raise AdmissionDenied("LOCAL_GIT_FAILED")
         return result.stdout.strip()
-    actual_root = Path(git("rev-parse", "--show-toplevel")).resolve(strict=True)
+    try:
+        actual_root = Path(git("rev-parse", "--show-toplevel")).resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise AdmissionDenied("CHECKOUT_ROOT_INVALID") from exc
     if actual_root != root:
         raise AdmissionDenied("CHECKOUT_ROOT_MISMATCH")
     head = git("rev-parse", "HEAD")
