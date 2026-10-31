@@ -52,3 +52,7 @@ class LedgerTests(unittest.TestCase):
     def test_reject_bad_id(self):
         with self.assertRaises(ReplayDenied):
             self.ledger.claim("req_short", "a"*64)
+
+    def test_two_process_safe_duplicate(self):
+        self.assertTrue(self.ledger.claim("req_123456789abc", "a"*64))
+        self.assertFalse(RequestLedger(self.path).claim("req_123456789abc", "a"*64))
