@@ -20,3 +20,27 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Full Gserver Python source regression
         run: python3 -B -m unittest discover -s tests -p 'test_*.py' -q
+      - name: Docker Core smoke (isolated localhost; no published ports)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull=false -t gace-gserver:ci -f Dockerfile .
+          name=gserver-ci-smoke
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$name" --network none --read-only \
+            --user 65534:65534 --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 64 --memory 256m --cpus 0.50 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=65534,gid=65534,mode=0700 \
+            --tmpfs /var/lib/gserver:rw,nosuid,nodev,noexec,size=16m,uid=65534,gid=65534,mode=0700 \
+            gace-gserver:ci
+          ok=0
+          for attempt in $(seq 1 25); do
+            if docker exec "$name" python3 -B -c               "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=2); assert r.status==200"; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ok" = 1
+          docker exec "$name" python3 -B -c             "import urllib.request,urllib.error; u='http://127.0.0.1:8765/status'; exec('try: urllib.request.urlopen(u,timeout=2); raise AssertionError(\"protected route leaked\")\\nexcept urllib.error.HTTPError as e: assert e.code==401')"
+          echo GSERVER_CONTAINER_HEALTH_AUTH=PASS
