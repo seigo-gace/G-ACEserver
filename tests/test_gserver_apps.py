@@ -68,6 +68,19 @@ class AppTests(unittest.TestCase):
             self.assertIn('stop', run.call_args_list[-1].args[0])
             self.assertNotIn('down', run.call_args_list[-1].args[0])
 
+    def test_restart_recreates_process_without_volume_removal(self):
+        data = {'services': {'web': {'image': 'sha256:' + '0' * 64}}}
+        with mock.patch.object(a, 'run', side_effect=[json.dumps(data), '', '']) as run:
+            a.execute('restart', self.file, 'web')
+            self.assertEqual(len(run.call_args_list), 3)
+            restart_cmd = run.call_args_list[1].args[0]
+            up_cmd = run.call_args_list[2].args[0]
+            self.assertIn('restart', restart_cmd)
+            self.assertNotIn('down', restart_cmd)
+            self.assertIn('up', up_cmd)
+            self.assertIn('--no-build', up_cmd)
+            self.assertEqual(up_cmd[up_cmd.index('--pull') + 1], 'never')
+
     def test_no_secrets_emitted_on_docker_errors(self):
         class Result: returncode=1; stdout='secret'; stderr='password=sensitive'
         with mock.patch.object(a.subprocess, 'run', return_value=Result()):
