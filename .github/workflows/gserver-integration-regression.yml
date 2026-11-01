@@ -2,7 +2,7 @@ name: Gserver integrated source regression
 on:
   push:
     branches:
-      - chat/gserver-integrated-f02-s5-20261101
+      - main
   pull_request:
     paths:
       - app/**
