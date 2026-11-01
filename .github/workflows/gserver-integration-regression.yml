@@ -1,0 +1,22 @@
+name: Gserver integrated source regression
+on:
+  push:
+    branches:
+      - chat/gserver-integrated-f02-s5-20261101
+  pull_request:
+    paths:
+      - app/**
+      - scripts/**
+      - tests/**
+      - deploy/**
+      - .github/workflows/gserver-integration-regression.yml
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Full Gserver Python source regression
+        run: python3 -B -m unittest discover -s tests -p 'test_*.py' -q
