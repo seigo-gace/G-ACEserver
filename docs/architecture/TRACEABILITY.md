@@ -29,7 +29,7 @@ F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Com
 
 ### 現時点での正本と証拠区分
 
-- GitHub実装候補：G-ACEserver Draft PR #15、branch `chat/gserver-generic-app-runtime-20261030`、対応HEAD `5d281f5209ce0b808a0cc58d8a9969836130f877`。mainへの統合やMaster PCへの反映を意味しない。PR #24/#25はこのbranchへ統合済み。別途正本Repoの実機HEADが更新された場合は照合し直す。
+- GitHub実装候補：G-ACEserver Draft PR #15、branch `chat/gserver-generic-app-runtime-20261030`、Source/CI照合に使用したベースSHA `5d281f5209ce0b808a0cc58d8a9969836130f877`（本マッピング追加前）。以後の文書専用CommitでSourceの受入実機SHAを更新したことにはしない。mainへの統合やMaster PCへの反映を意味しない。PR #24/#25はこのbranchへ統合済み。別途正本Repoの実機HEADが更新された場合は照合し直す。
 - **CI実測**：[Actions Run 41423817040](https://github.com/seigo-gace/G-ACEserver/actions/runs/41423817040)（PR #15 HEAD `5d281f52`）：Python 349/349、Core Docker health/auth、Bot Dockerの202保存・202再送・409競合・権限分離・restart後SQLite保持がPASS。**実行HostはGitHub runner**でありMaster PCではない。
 - **Master PC実測**：2026-11-01のOwner返却で`PC_GENERIC_APP_RUNTIME_SMOKE`、`INDEPENDENT_APP_LIFECYCLE_DEMO`とも`VERIFY=PASS/EXIT_CODE=0`。独立アプリ二件の共存・停止分離・永続化・config rollback・Core/Storage無干渉を受入。ログは現行統合HEADそのもののBot installを証明していない。Owner PC の `BOT_GSERVER_LOCAL=PASS` は**未提示**。
 - **既存局所実機証拠**：Coreの認証/Storage ready/files、G:の主要な操作、JP/KR VPN隔離試験などはPR #15設計・CURRENTに個別記録あり。ただしF01〜F08の総合受入とは別。Gateway→P015 Telegram raw/index一致、F04 search/current切替、F05 encrypted restore、完全自動起動/PC障害復旧は未受入。
