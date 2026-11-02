@@ -44,3 +44,5 @@ jobs:
           test "$ok" = 1
           docker exec "$name" python3 -B -c             "import urllib.request,urllib.error; u='http://127.0.0.1:8765/status'; exec('try: urllib.request.urlopen(u,timeout=2); raise AssertionError(\"protected route leaked\")\\nexcept urllib.error.HTTPError as e: assert e.code==401')"
           echo GSERVER_CONTAINER_HEALTH_AUTH=PASS
+      - name: Docker Bot auth, duplicate and persistent spool after restart
+        run: python3 -B scripts/ci_gserver_bot_docker_smoke.py
