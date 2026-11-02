@@ -121,6 +121,19 @@ def main():
             raise RuntimeError("bot container did not become healthy")
         print(inside(name, "first"))
         run("docker", "restart", name, step="docker_restart")
+        # docker restart returns before HTTP bind; wait on the same local
+        # readiness probe rather than treating startup latency as data loss.
+        for _ in range(30):
+            check = subprocess.run(
+                ("docker", "exec", name, "python3", "-B", "-c",
+                 "import urllib.request; assert urllib.request.urlopen("
+                 "'http://127.0.0.1:8765/health',timeout=2).status==200"),
+                capture_output=True, timeout=5)
+            if check.returncode == 0:
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("bot container did not recover after restart")
         print(inside(name, "restart"))
         print("BOT_DOCKER_PERSISTENCE_AUTH_CONFLICT=PASS")
     finally:
