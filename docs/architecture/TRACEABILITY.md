@@ -25,7 +25,7 @@ F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Com
 
 ## 2026-11-04｜全project共通domain設定（F02/F06/F07）
 
-入口 `scripts/gserver_domains.py`、owner/zone/endpointとbindingのprivate JSON → hash付きdesired revision → project/Tunnel別ingress。新project追加/旧host併存切替/取消済みzone拒否/認証保持/競合防止/復元は `tests/test_gserver_domains.py` の19件、全380 tests PASS。`scripts/verify_gserver_domains_host.py` は既存cloudflaredのnetwork noneで架空domainのnative設定/新旧route/未知host404/rollbackと既存container不変PASS。本番DNS/Tunnel/Access/callback反映は未実施、live=NOT_VERIFIED。コードを変更せず任意projectのdomain設定を差替え可能。[操作/境界](APPS_RUNTIME.md#project-domain-configuration)。
+入口 `scripts/gserver_domains.py`、owner/zone/endpointとbindingのprivate JSON → hash付きdesired revision → project/Tunnel別ingress。新project追加/旧host併存切替/取消済みzone拒否/認証保持/競合防止/復元は `tests/test_gserver_domains.py` の19件、全380 tests PASS。`scripts/verify_gserver_domains_host.py` は既存cloudflaredのnetwork noneで架空domainのnative設定/新旧route/未知host404/rollbackと既存container不変PASS。実装 `406c967` の [CI Run 41734067150](https://github.com/seigo-gace/G-ACEserver/actions/runs/41734067150) SUCCESS（Python/Core/Bot Docker、native domain auditはPC証拠）。本番DNS/Tunnel/Access/callback反映は未実施、live=NOT_VERIFIED。コードを変更せず任意projectのdomain設定を差替え可能。[操作/境界](APPS_RUNTIME.md#project-domain-configuration)。
 
 ## 2026-11-04｜販売Botの所有・接続Gate更新
 
