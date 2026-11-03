@@ -53,3 +53,21 @@ The probe checks two simultaneous apps; stop isolation; stop/start persistence; 
 ## Independent app lifecycle acceptance (Composer PR #18 integration)
 
 The original PC smoke demonstrated two independent app projects, stop isolation, persistent state and config rollback without changing Core/Storage. Reuse the existing `scripts/demo_independent_app_lifecycle.sh` only for an explicit repeatable owner-PC validation after any runtime integration. `restart` first restarts the app project without `compose down`, then waits for readiness via the existing immutable-image `up --no-build --pull never` operation. Stop/start and rollback retain named volumes. This integration preserves PR #15's safe logging and successful-probe diagnostic, rather than replacing them with the older PR #18 versions.
+
+## VideoBot consumer contract acceptance
+
+The active sales app is [`seigo-gace/create-videobot`](https://github.com/seigo-gace/create-videobot/pull/1), not GateApp-Bot or a legacy group Bot. Its app code, sales state and payment logic stay in that repository. Gserver owns execution and operational metadata admission; it does not accept purchase records, media IDs, customer IDs or payment values as logs. Tumblr remains a separate consumer, with its own GATE/MPB and OAuth contracts.
+
+`scripts/smoke_videobot_integration.py` accepts an existing app source checkout or a verified temporary source snapshot and an immutable, already-local Node image. It checks the actual bootstrap/config/event adapter against the pinned upstream Git blobs at `ae8a2385d52d0579468c2e5cb2f3307f94524666`. It never clones, builds, pulls or changes the source. Source owners must keep that directory stable during execution. This is a trusted-owner acceptance tool, not a sandbox for arbitrary app authors.
+
+```bash
+python3 -B scripts/smoke_videobot_integration.py \
+  --app-source /absolute/existing/create-videobot \
+  --node-image node@sha256:025b8e975a61d94e33abeafaad1255ef44e4898cf1a1b6446860009c72e6d284
+```
+
+The exact Node linux/amd64 digest was resolved from the official Node22 Alpine manifest. The probe requires the healthy existing local Core/Storage as an invariant reference; it reuses its image in a disposable clone. Only the new clone, client containers, internal network and owned fresh volume are changed. No ports are published, the network is Docker `internal`, and the client is nonroot/read-only with bounded resources/logs. A synthetic Bot token enters client tmpfs by stdin. The synthetic Owner token stays in the clone. Token values never enter process arguments, environment, Source or evidence output.
+
+On the owner PC, real upstream bootstrap/adapter admission, duplicate replay, conflicting content 409, wrong Bot credential 401, Bot rejection by the Owner-only API and clone restart/SQLite fingerprint preservation passed on 2026-11-04. All pre-existing containers and authenticated Core/Storage responses were unchanged; disposable resources were removed. The app's 37 offline Node tests also passed; Gserver's full 361 Python tests passed. `tests/test_videobot_integration.py` covers provenance rejection, secret diagnostics, cleanup on failure, refusal to remove foreign resources, internal-network admission and pre-existing-service invariants.
+
+The upstream staging Compose currently requests build, a mutable local image tag and an external shared network. It is **not directly accepted** by `gserver_apps.py`: actual config-only inspection returned `EXTERNAL_RESOURCE_NOT_ALLOWED` as expected. Do not remove that guard or add the production Core to an app network to make this sample run. Production admission needs the app-owned immutable image, least-privilege credential supply, durable sales data and backup/restore, health/readiness and the adopted protected egress/ingress contract. The upstream bootstrap exits after one operational event; it is not a running Telegram sales service. No Telegram publishing, Stars charge/refund, payout, live Gateway/P015 or Tumblr OAuth acceptance is implied.

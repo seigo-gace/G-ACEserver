@@ -1,3 +1,13 @@
+# 2026-11-04 Codex｜@CreateVdobot正本確定・実adapterの隔離接続PASS
+
+- **Master対象確定:** 主対象は `seigo-gace/create-videobot`（動画販売・出品・Stars売上管理）。Gserverは実行/永続化、TGserverは運用ログ（Gserver=P015）、webhook-gatewayは認証/配送、server-coreは共通運用、GateApp-Botは参加/権限、tumblr-integrationは集客/告知。GateApp-Botや旧Botを販売Botとして配備しない。KBは後段を維持。
+- **Sourceと実装範囲:** create-videobot Draft PR #1 / `feat/assistant-ai-and-sales-core` の固定 `ae8a2385d52d0579468c2e5cb2f3307f94524666` を読戻し。mainのREADMEだけでコード不在と判断しない。現runtimeは起動時に運用eventを送るbootstrapで、販売受付の常駐runtimeではない。既存adapter/main/configを再実装せず、`scripts/smoke_videobot_integration.py` で実行する。実行3moduleのGit blob SHAを固定照合、別Repo/兄弟Project/新Bot/新Tokenの本番発行なし。
+- **PC実機:** 公式Node22 linux/amd64 imageをdigest固定で取得（HostにNodeを常設しない）。実Source22fileのGit blob照合後、network none/非root/read-onlyのNodeコンテナでVideoBot **37 tests PASS**。専用internal network・検証用Core clone・専用volume・合成Owner/Bot認証で実bootstrapとHTTP adapterを実行。`VIDEOBOT_BOOTSTRAP_PRIVATE_AUTH_REPLAY=PASS`、`VIDEOBOT_CORE_RESTART_SQLITE=PASS`、`EXISTING_CORE_STORAGE_CONTAINERS_UNCHANGED=PASS`、`VERIFY=PASS`。Bot secretはstdinからclient tmpfsだけへ供給、Owner secretは渡さない。検証Core再起動後も同一eventのfingerprint/payload一致。専用container/network/volumeはcleanup済み。本番Coreを停止/再配備せず、Telegram・支払・外部API送信なし。
+- **修正/回帰:** 新probeのlocal loggingは圧縮互換の2世代へ修正（1世代ではdaemonが起動拒否）。既存smoke/demoのsudo precheckはrootを誤認しないよう補正。重点16 tests PASS、最終全Python **361 tests PASS**。初回隔離試験はログdriver設定で不合格、修正後の上記実機で成功。sudoなしshellの旧mockとの不整合2件も修正して全回帰成功。CIは新Sourceについて未確認、前commit CIとは区別する。
+- **配備Gate:** appの元staging Composeはbuild・mutable tag・共有external networkを前提とする。実config解析でGserverの現隔離方針により `EXTERNAL_RESOURCE_NOT_ALLOWED` と拒否されることを確認（意図どおり、build/startなし）。本probeの内部clone接続を本番app接続と呼ばず、Coreを共有networkへ接続するために制約を緩めない。実VideoBotの常駐受信/販売台帳の耐久化、app専用の正式認証、VPN/Cloudflare経路、再送/失敗復旧、Tumblr実OAuth/adapterは別の未受入Gate。決済や投稿の実操作は未実施。詳細は [APPS_RUNTIME](architecture/APPS_RUNTIME.md#videobot-consumer-contract-acceptance)。
+
+---
+
 # 2026-11-04 Codex｜既存プロジェクトの安全利用を優先・PC Bot受入PASS
 
 - **最新意思・場所:** [Master依頼](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6609156937)と今回の直接指示を適用。KB/F04は後実装、既存プロジェクトの安全な利用・復旧を先行。D側WSL ext4の既存正本だけを編集し、G側旧copyは保持。PR #15 branchを `83b7060` へfast-forward、既存のWorkspace関連未コミット4件と未追跡ファイルは保全し、本変更へ混入させない。

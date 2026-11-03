@@ -89,7 +89,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="gserver-app-smoke-") as directory:
         file = Path(directory) / "compose.json"
         try:
-            if DOCKER[0] == "sudo":
+            if apps.os.geteuid() != 0 and DOCKER[0] == "sudo":
                 phase = "DOCKER_SUDO_AUTH_REQUIRED"
                 apps.run(["sudo", "-n", "true"])
             phase = "PRECHECK"

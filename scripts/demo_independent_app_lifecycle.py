@@ -62,7 +62,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="gserver-app-demo-") as directory:
         compose = Path(directory) / "compose.json"
         try:
-            if DOCKER[0] == "sudo":
+            if apps.os.geteuid() != 0 and DOCKER[0] == "sudo":
                 apps.run(["sudo", "-n", "true"])
             core = json.loads(docker("inspect", CORE))[0]
             if core["State"].get("Health", {}).get("Status") != "healthy":

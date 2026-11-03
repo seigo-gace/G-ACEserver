@@ -23,6 +23,10 @@ TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PA
 
 F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Compose→`gace-app-<name>`）。Core/API/Storageの既存 `scripts/gserverctl.py` とプロジェクト・volumeを分離する。検証は `tests/test_gserver_apps.py` と `tests/test_gserver_apps_smoke.py`、実機受入は `scripts/smoke_gserver_apps_host.sh` → `scripts/smoke_gserver_apps_host.py`。操作・症状・復旧対応は [APPS_RUNTIME](APPS_RUNTIME.md)。F05のBotログspool/Gateway連携は保持するが、F02の独立アプリ稼働を証明しない。F01/F06のWindows起動復帰とF04/F05/F08の最終受入は別Gateとして維持。
 
+## 2026-11-04｜販売Botの所有・接続Gate更新
+
+F02主対象は `seigo-gace/create-videobot`（Master明示）。GATE/GroupBotと取り違えない。既存Draft PR #1固定Source `ae8a2385` の実bootstrap/adapterを新規の専用Core cloneへ接続し、認証/重複/409/Owner拒否/再起動後SQLiteと既存Core/Storage/全container不変がPC PASS。実Sales/Telegram/支払稼働は未受入。入口 `scripts/smoke_videobot_integration.py`、境界回帰 `tests/test_videobot_integration.py`、手順/残Gate [APPS_RUNTIME](APPS_RUNTIME.md#videobot-consumer-contract-acceptance)。VideoBot37 Node tests、Gserver361 Python tests PASS。元stagingの共有external networkは現app管理で意図どおり拒否、無断で例外を追加しない。Tumblrの実OAuth/adapterとF04は別の残Gate。
+
 ## 2026-11-04｜PC実測による更新（後続の11/02表より優先）
 
 - **F02:** 統合Source `83b7060` の4アプリmodule SHAと稼働image内のSHAを照合し一致。再buildなしで既存 `bot_acceptance.verify(Controller())` の認証分離・202/duplicate/409・stop/start後SQLite保持・実Source一致がすべてPASS。独立apps既PASSは再実行なし。実Bot/Tumblr個別機能と旧imageへの復帰は別の未受入Gate。
