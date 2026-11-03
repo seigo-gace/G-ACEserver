@@ -1,0 +1,15 @@
+{
+  "schema": "gserver.domains.v1",
+  "bindings": [
+    {
+      "project": "videobot",
+      "endpoint": "webhook",
+      "hostname": "video.example.com"
+    },
+    {
+      "project": "tumblr",
+      "endpoint": "web",
+      "hostname": "tumblr.example.org"
+    }
+  ]
+}

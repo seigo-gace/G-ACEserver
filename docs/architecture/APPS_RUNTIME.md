@@ -71,3 +71,52 @@ The exact Node linux/amd64 digest was resolved from the official Node22 Alpine m
 On the owner PC, real upstream bootstrap/adapter admission, duplicate replay, conflicting content 409, wrong Bot credential 401, Bot rejection by the Owner-only API and clone restart/SQLite fingerprint preservation passed on 2026-11-04. All pre-existing containers and authenticated Core/Storage responses were unchanged; disposable resources were removed. The app's 37 offline Node tests also passed; Gserver's full 361 Python tests passed. `tests/test_videobot_integration.py` covers provenance rejection, secret diagnostics, cleanup on failure, refusal to remove foreign resources, internal-network admission and pre-existing-service invariants.
 
 The upstream staging Compose currently requests build, a mutable local image tag and an external shared network. It is **not directly accepted** by `gserver_apps.py`: actual config-only inspection returned `EXTERNAL_RESOURCE_NOT_ALLOWED` as expected. Do not remove that guard or add the production Core to an app network to make this sample run. Production admission needs the app-owned immutable image, least-privilege credential supply, durable sales data and backup/restore, health/readiness and the adopted protected egress/ingress contract. The upstream bootstrap exits after one operational event; it is not a running Telegram sales service. No Telegram publishing, Stars charge/refund, payout, live Gateway/P015 or Tumblr OAuth acceptance is implied.
+
+## Project domain configuration
+
+`scripts/gserver_domains.py` manages project-specific domain **intent** independently of app Source. Add any project using its repository, allowed zones and named endpoint contracts in a private JSON file. The public examples in `deploy/domain-policy.example.json` and `deploy/domain-bindings.example.json` contain fictional domains/Tunnel IDs and no credentials; replace their values with the verified owner deployment contract before actual use. A policy file records intent and does not grant Provider/domain authority.
+
+Each endpoint fixes its origin, Tunnel, callback paths and authentication contract. Domain changes cannot silently change these fields. Origins are restricted to explicit-port HTTP(S) loopback or single-label Docker service names, interpreted **inside that project's verified connector/VPN namespace**. The exporter does not make a Host loopback service reachable inside another container or establish network authority. Distinct apps must retain their existing isolation. Team/audience metadata supports Cloudflare Access; a Telegram webhook can instead declare its existing app-owned webhook-secret contract. Neither declaration proves that authentication is live. Credentials, subscriber/payment data and real deployment mappings stay outside Git.
+
+Create owner-only configuration copies using the existing local state area:
+
+```bash
+install -d -m 700 "$HOME/.local/state/gserver/domain-config"
+install -m 600 deploy/domain-policy.example.json "$HOME/.local/state/gserver/domain-config/policy.json"
+install -m 600 deploy/domain-bindings.example.json "$HOME/.local/state/gserver/domain-config/routes.json"
+```
+
+Edit those private files to match the verified deployment. Initial preparation and ordinary operations use the same tool:
+
+```bash
+python3 -B scripts/gserver_domains.py prepare \
+  --state "$HOME/.local/state/gserver/domains" \
+  --policy "$HOME/.local/state/gserver/domain-config/policy.json" \
+  --routes "$HOME/.local/state/gserver/domain-config/routes.json" --expect none
+python3 -B scripts/gserver_domains.py status --state "$HOME/.local/state/gserver/domains"
+python3 -B scripts/gserver_domains.py switch \
+  --state "$HOME/.local/state/gserver/domains" \
+  --policy "$HOME/.local/state/gserver/domain-config/policy.json" \
+  --project videobot --endpoint webhook --hostname NEW_HOSTNAME --expect CURRENT_REVISION
+python3 -B scripts/gserver_domains.py export \
+  --state "$HOME/.local/state/gserver/domains" \
+  --policy "$HOME/.local/state/gserver/domain-config/policy.json" --output FRESH_PRIVATE_OUTPUT
+python3 -B scripts/gserver_domains.py rollback \
+  --state "$HOME/.local/state/gserver/domains" \
+  --policy "$HOME/.local/state/gserver/domain-config/policy.json" \
+  --revision PRIOR_REVISION --expect CURRENT_REVISION
+```
+
+The commands print revisions, not real hostnames or origin details. Copy the actual revision from preparation/status into `--expect`; stale writers fail without changing the desired pointer. A domain switch retains previous names as aliases by default. After actual DNS/auth/callback readback succeeds, explicitly repeat `switch` with the current primary hostname and `--remove-old` to remove prior aliases from the desired plan. Maximum ten retained aliases per endpoint; do not discard old routes merely to bypass that limit. Repeat identical preparation is idempotent. Each changed revision is immutable/hash-checked, and a locked, fsynced atomic desired pointer preserves prior intent across ordinary process failure. Rollback revalidates old bindings under today's policy, including revoked zones. This is not a completed Windows power-loss acceptance.
+
+Export produces one `TUNNEL_ID.ingress.json` per selected Tunnel plus private `plan.json`, containing public callback URLs and readback dependencies. Rules end with `http_status:404`; unknown hosts are not sent to an app. The JSON ingress form was validated by the existing native cloudflared, including required Access metadata. For a **remotely managed** token-file connector, exporting a local file does not change the remote configuration. Provider integration must read/merge existing rules and preserve unrelated routes; do not blindly replace a shared Tunnel configuration with this project's desired subset. For a **locally managed** connector, the existing owner-managed deployment must select the validated configuration through its supported configuration mechanism. No credential format conversion or parallel connector is created here.
+
+All CLI results remain `DESIRED_ONLY` / live `NOT_VERIFIED`. The tool makes no DNS/Tunnel/Access/OAuth/Telegram changes and does not restart apps. Actual cutover requires the verified owner-zone/Tunnel mapping, current provider readback, DNS/TLS/WAF/rate-limit/Access preservation, VPN-origin reachability, new callback registration through the app/provider's existing API, new-domain tests and rollback readback. A generated file or a local rollback alone is not a public-domain switch.
+
+Offline owner-PC verification with an already-local immutable connector image:
+
+```bash
+python3 -B scripts/verify_gserver_domains_host.py --cloudflared-image LOCAL_IMAGE_SHA256
+```
+
+This uses only the fictional examples and `network none`: multi-project native ingress validation, old/new hostname matching, unknown-host 404, desired-state rollback and unchanged pre-existing containers. It uses no credentials or Provider connection. Official format/reference: [Cloudflare configuration](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/configuration-file/), [remote configuration API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/tunnels/subresources/cloudflared/subresources/configurations/methods/update/).

@@ -23,6 +23,10 @@ TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PA
 
 F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Compose→`gace-app-<name>`）。Core/API/Storageの既存 `scripts/gserverctl.py` とプロジェクト・volumeを分離する。検証は `tests/test_gserver_apps.py` と `tests/test_gserver_apps_smoke.py`、実機受入は `scripts/smoke_gserver_apps_host.sh` → `scripts/smoke_gserver_apps_host.py`。操作・症状・復旧対応は [APPS_RUNTIME](APPS_RUNTIME.md)。F05のBotログspool/Gateway連携は保持するが、F02の独立アプリ稼働を証明しない。F01/F06のWindows起動復帰とF04/F05/F08の最終受入は別Gateとして維持。
 
+## 2026-11-04｜全project共通domain設定（F02/F06/F07）
+
+入口 `scripts/gserver_domains.py`、owner/zone/endpointとbindingのprivate JSON → hash付きdesired revision → project/Tunnel別ingress。新project追加/旧host併存切替/取消済みzone拒否/認証保持/競合防止/復元は `tests/test_gserver_domains.py` の19件、全380 tests PASS。`scripts/verify_gserver_domains_host.py` は既存cloudflaredのnetwork noneで架空domainのnative設定/新旧route/未知host404/rollbackと既存container不変PASS。本番DNS/Tunnel/Access/callback反映は未実施、live=NOT_VERIFIED。コードを変更せず任意projectのdomain設定を差替え可能。[操作/境界](APPS_RUNTIME.md#project-domain-configuration)。
+
 ## 2026-11-04｜販売Botの所有・接続Gate更新
 
 F02主対象は `seigo-gace/create-videobot`（Master明示）。GATE/GroupBotと取り違えない。既存Draft PR #1固定Source `ae8a2385` の実bootstrap/adapterを新規の専用Core cloneへ接続し、認証/重複/409/Owner拒否/再起動後SQLiteと既存Core/Storage/全container不変がPC PASS。実Sales/Telegram/支払稼働は未受入。入口 `scripts/smoke_videobot_integration.py`、境界回帰 `tests/test_videobot_integration.py`、手順/残Gate [APPS_RUNTIME](APPS_RUNTIME.md#videobot-consumer-contract-acceptance)。VideoBot37 Node tests、Gserver361 Python tests PASS。実装 `807af80` の [CI Run 41677777575](https://github.com/seigo-gace/G-ACEserver/actions/runs/41677777575) はPython/Core/Bot Docker各step SUCCESS（VideoBot consumerの実接続はPC証拠）。元stagingの共有external networkは現app管理で意図どおり拒否、無断で例外を追加しない。Tumblrの実OAuth/adapterとF04は別の残Gate。

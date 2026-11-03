@@ -1,0 +1,43 @@
+{
+  "schema": "gserver.domains.v1",
+  "projects": {
+    "videobot": {
+      "repository": "seigo-gace/create-videobot",
+      "zones": [
+        "example.com",
+        "example.net"
+      ],
+      "endpoints": {
+        "webhook": {
+          "origin": "http://127.0.0.1:8080",
+          "tunnel": "00000000-0000-0000-0000-000000000001",
+          "callbacks": [
+            "/telegram/webhook"
+          ],
+          "application_auth": "telegram-webhook-secret"
+        }
+      }
+    },
+    "tumblr": {
+      "repository": "seigo-gace/tumblr-integration",
+      "zones": [
+        "example.org"
+      ],
+      "endpoints": {
+        "web": {
+          "origin": "http://127.0.0.1:8081",
+          "tunnel": "00000000-0000-0000-0000-000000000002",
+          "callbacks": [
+            "/oauth/callback"
+          ],
+          "access": {
+            "team_name": "example-team",
+            "aud_tags": [
+              "0000000000000000000000000000000000000000000000000000000000000000"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
