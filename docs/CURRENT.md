@@ -6,6 +6,7 @@
 - **PC Bot実測:** 稼働中イメージと統合版の4アプリmodule SHAが一致したため再build/activateせず、既存 `bot_acceptance.verify(Controller())` を実行。`BOT_HOST_AUTH_REPLAY_CONFLICT=PASS`、`BOT_SQLITE_STOP_START_PERSISTENCE=PASS`、`BOT_RUNTIME_SOURCE_MATCH=PASS`。既存Coreだけstop/startしhealthyへ復帰。同じeventの202/duplicateと異内容409、Owner/Bot認可分離を実測。合成検証eventは既存spoolに保持。Gateway設定なしを値非表示で確認し、外部送信なし。
 - **PC保存・復旧実測:** 停止前/再起動後とも認証付きready/files 200、SQLite read-only quick_check PASS。G:の専用一時dirだけでput/hash/replace/trash/restore/get/quota、1,572,900 bytes照合PASS、既存利用者file変更なし。F01 WSL systemd/Docker/containerd enabled/activeとCompose到達PASS（最初のDocker infoはtimeout、再確認成功）。USB断・容量枯渇・Windows reboot・旧image復帰・全体復元は未実施。
 - **境界・次工程:** 独立Apps既PASSの実機smoke/demoは再実行していない。Bot運用ログの局所受入は実Bot/Tumblrアプリ機能やF02全体完成ではない。次は対象app所有Compose/認証/データ契約を照合し、既存VPN/Cloudflareの正式接続・復旧とF03/F06異常系を優先。Gateway/P015 raw/indexと共通Terminal第2Hostは正式な所有/接続契約の範囲で継続し、認証未設定を別Host/別zoneで迂回しない。F04は後段、暗号backup/隔離復元・Windows起動復帰を含むF01〜F08全体は未完了。
+- **対象appの追加確認:** MasterはTelegram BotとTumblrの両方を進行中と回答。Tumblr正本 `seigo-gace/tumblr-integration` のDraft PR #1 / `feat/initial-modular-core`（`f3aa75c`）を読戻し、Python/SQLite試作とGATE/MPB adapter契約を確認。実OAuth/adapter/配備Composeは未実装、mainだけでコード不在と判断しない。Telegram側は複数の既存候補があり、対象Repoの正確なURLをMasterへ確認中。候補の未コミット変更を取り込んだり実Botを起動したりしていない。双方の実app受入は未完了。正本確定後はapp所有のimmutable image、認証/データ、health/resource、VPN保護・復旧契約を既存Gserverへ接続する。
 - **Rollback:** 本変更はHost側CLIのみ、Core image/Compose/volume/認証設定は維持。修正commitを戻せば従来のsudo選択へ復帰。合成eventや原本を削除してrollbackしたことにしない。
 
 ---

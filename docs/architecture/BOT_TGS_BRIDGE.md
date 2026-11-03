@@ -33,7 +33,7 @@ SQLite uses WAL plus FULL synchronous, max 5000 outstanding, durable claims, bou
 - Future Bot containers must be explicitly attached to an authorized Docker network and receive only the Bot secret; never reuse the Owner API token.
 
 ## Source vs live status
-TGserver source registry and ZERO central search reader map include Gserver P015/G002. Live TGserver registry deployment, five severity topic provisioning, Gateway destination configuration, credentials, real Telegram raw delivery, index/search correlation and Gserver Docker local Bot runtime are all NOT_VERIFIED until independently exercised.
+TGserver source registry and ZERO central search reader map include Gserver P015/G002. Live TGserver registry deployment, five severity topic provisioning, Gateway destination configuration, credentials, real Telegram raw delivery and index/search correlation remain NOT_VERIFIED until independently exercised. On 2026-11-04, the owner PC local Bot logging API passed authentication separation, 202/duplicate/409, runtime module SHA matching and SQLite persistence across Core stop/start (see CURRENT). This accepts local operational logging only; the actual Telegram/Tumblr applications, remote delivery and image rollback remain separate gates.
 Do not provision topics from Git history without auditing LIVE TGserver topics and state. Do not expose Gateway /internal/events to public Internet or bypass its existing access controls.
 
 ## Final acceptance
