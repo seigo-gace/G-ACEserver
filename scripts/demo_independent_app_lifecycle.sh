@@ -5,5 +5,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 python3 -B -m unittest discover -s tests -p 'test_gserver_apps*.py' -q
-sudo -v
+if [[ ! -r /var/run/docker.sock || ! -w /var/run/docker.sock ]]; then
+    sudo -v
+fi
 exec python3 -B scripts/demo_independent_app_lifecycle.py

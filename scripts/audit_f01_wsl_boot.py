@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from local_docker import docker_command
 
 WSL_CONF = Path("/etc/wsl.conf")
 
@@ -49,7 +50,7 @@ def unit_state(unit):
 
 
 def docker_cmd():
-    return ["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]
+    return docker_command()
 
 
 def docker_summary():

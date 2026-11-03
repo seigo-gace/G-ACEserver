@@ -8,6 +8,7 @@ import sys
 import urllib.request
 
 from gserver_apps import AppError, run, DOCKER_SOCKET
+from local_docker import docker_command
 
 # This program runs inside the existing Core. Token/SQLite rows never leave it.
 CORE_CHECK = '''import os,json,pathlib,sqlite3,urllib.request
@@ -38,7 +39,7 @@ def main():
             if response.status != 200:
                 raise ValueError()
         result['core_http'] = 'PASS'
-        docker = ([] if os.geteuid() == 0 else ['sudo', '-n']) + ['docker', '--host', DOCKER_SOCKET]
+        docker = docker_command()
         info = json.loads(run(docker + ['inspect', 'gace-gserver-gserver-1']))[0]
         if info['State'].get('Health', {}).get('Status') != 'healthy':
             raise ValueError()

@@ -7,10 +7,11 @@ Gserver hosts app-owned Docker Compose projects. The existing Core/API/Storage d
 
 ## Local CLI
 
-Use the existing WSL terminal, with the existing Docker/Compose installation and local app image. Keep app code/configuration in its own directory; private data and credentials stay outside Git. The CLI uses local Docker via existing sudo authority, never a remote context or registry. It does not build/pull images or delete app volumes.
+Use the existing WSL terminal, with the existing Docker/Compose installation and local app image. Keep app code/configuration in its own directory; private data and credentials stay outside Git. The CLI uses existing local Docker socket authority directly (root or an already-authorized group member), falling back to noninteractive sudo only when socket access is unavailable. `scripts/local_docker.py` pins the daemon to `unix:///var/run/docker.sock`; remote contexts and registry access are not selected. No group, socket permission or sudo policy is changed by the CLI. It does not build/pull images or delete app volumes.
 
 ```bash
-sudo -v
+# Only when the current shell lacks Docker socket access:
+# sudo -v
 python3 -B scripts/gserver_apps.py verify my-app /absolute/app/compose.yaml
 python3 -B scripts/gserver_apps.py start my-app /absolute/app/compose.yaml
 python3 -B scripts/gserver_apps.py status my-app /absolute/app/compose.yaml
@@ -32,7 +33,7 @@ Only explicit loopback ports (`127.0.0.1`/`::1`) are permitted. App authors supp
 bash scripts/smoke_gserver_apps_host.sh
 ```
 
-This runs focused tests and authenticates sudo in that terminal. It reuses the running Core's immutable local Python image for two synthetic app processes; no build/pull, production restart, external traffic, Host setting change or real app credentials are involved. Each app has its own guarded random project and fresh volume, nonroot/read-only process, no network/ports, dropped capabilities and bounded CPU/RAM/PIDs/logging.
+This runs focused tests and authenticates sudo in that terminal only when direct Docker socket access is unavailable. It reuses the running Core's immutable local Python image for two synthetic app processes; no build/pull, production restart, external traffic, Host setting change or real app credentials are involved. Each app has its own guarded random project and fresh volume, nonroot/read-only process, no network/ports, dropped capabilities and bounded CPU/RAM/PIDs/logging.
 
 The probe checks two simultaneous apps; stop isolation; stop/start persistence; configuration update and previous configuration restoration through container recreation; status/log access; authenticated Core `/ready` and `/files`; and unchanged IDs/images/start times/status/mounts for all pre-existing containers. Synthetic volumes and containers are removed on exit, including failure; production volumes are never selected. The test fails when Core/Storage is not already ready, Docker authority is absent, or a pre-existing container changes during the check. The image is reused without running the Gserver application/Worker inside the probes.
 
@@ -42,6 +43,7 @@ The probe checks two simultaneous apps; stop isolation; stop/start persistence; 
 
 | Symptom | Source / check | Recovery |
 | --- | --- | --- |
+| Docker CLI works but management asks for sudo | `scripts/local_docker.py`, `tests/test_local_docker.py` | Use the current authorized shell; after an owner-approved group change, reconnect or use `newgrp docker`. Kernel namespace/VPN helpers still require their existing sudo authority |
 | Compose rejected | `scripts/gserver_apps.py`, `tests/test_gserver_apps.py` | Correct app-owned definition; `verify` before `start` |
 | Start/readiness failure | App healthcheck, `status`, `logs --show-logs` | Fix app or restore previous Compose/image; `start` |
 | Core/Storage failure | Existing `scripts/gserverctl.py`, Core release ledger | Existing Core recovery; do not replace with app configuration |

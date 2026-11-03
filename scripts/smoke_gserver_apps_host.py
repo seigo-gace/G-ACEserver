@@ -10,7 +10,7 @@ import tempfile
 
 import gserver_apps as apps
 
-DOCKER = (["docker"] if apps.os.geteuid() == 0 else ["sudo", "-n", "docker"]) + ["--host", apps.DOCKER_SOCKET]
+DOCKER = apps.docker_command()
 CORE = "gace-gserver-gserver-1"
 
 
@@ -89,7 +89,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="gserver-app-smoke-") as directory:
         file = Path(directory) / "compose.json"
         try:
-            if apps.os.geteuid() != 0:
+            if DOCKER[0] == "sudo":
                 phase = "DOCKER_SUDO_AUTH_REQUIRED"
                 apps.run(["sudo", "-n", "true"])
             phase = "PRECHECK"

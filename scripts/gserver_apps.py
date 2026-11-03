@@ -16,8 +16,9 @@ import subprocess
 import sys
 import tempfile
 
+from local_docker import DOCKER_SOCKET, docker_command
+
 NAME = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
-DOCKER_SOCKET = "unix:///var/run/docker.sock"
 
 
 class AppError(Exception):
@@ -46,8 +47,7 @@ def project(name):
 
 def command(file, name):
     # Force the local daemon; never target a remote Docker context.
-    docker = ["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]
-    return docker + ["--host", DOCKER_SOCKET, "compose", "--project-name", project(name),
+    return docker_command() + ["compose", "--project-name", project(name),
                      "--project-directory", str(file.parent), "--env-file", "/dev/null", "-f", str(file)]
 
 

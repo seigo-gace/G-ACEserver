@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 
+from local_docker import docker_command
+
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "gserver"
 IMAGE = re.compile(r"sha256:[a-f0-9]{64}\Z")
@@ -53,7 +55,7 @@ class Controller:
         self.state = state
         self.record = state / "releases.json"
         self.pending = state / "pending.json"
-        self.docker = (["docker"] if os.geteuid() == 0 else ["sudo", "-n", "docker"]) + ["--host", "unix:///var/run/docker.sock"]
+        self.docker = docker_command()
 
     def bundle(self, image, create=False, access="isolated", storage=False):
         if not isinstance(image, str) or not IMAGE.fullmatch(image):

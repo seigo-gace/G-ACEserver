@@ -10,7 +10,7 @@ import tempfile
 
 import gserver_apps as apps
 
-DOCKER = (["docker"] if apps.os.geteuid() == 0 else ["sudo", "-n", "docker"]) + ["--host", apps.DOCKER_SOCKET]
+DOCKER = apps.docker_command()
 CORE = "gace-gserver-gserver-1"
 
 
@@ -62,7 +62,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="gserver-app-demo-") as directory:
         compose = Path(directory) / "compose.json"
         try:
-            if apps.os.geteuid() != 0:
+            if DOCKER[0] == "sudo":
                 apps.run(["sudo", "-n", "true"])
             core = json.loads(docker("inspect", CORE))[0]
             if core["State"].get("Health", {}).get("Status") != "healthy":

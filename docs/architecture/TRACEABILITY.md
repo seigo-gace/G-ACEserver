@@ -23,6 +23,13 @@ TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PA
 
 F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Compose→`gace-app-<name>`）。Core/API/Storageの既存 `scripts/gserverctl.py` とプロジェクト・volumeを分離する。検証は `tests/test_gserver_apps.py` と `tests/test_gserver_apps_smoke.py`、実機受入は `scripts/smoke_gserver_apps_host.sh` → `scripts/smoke_gserver_apps_host.py`。操作・症状・復旧対応は [APPS_RUNTIME](APPS_RUNTIME.md)。F05のBotログspool/Gateway連携は保持するが、F02の独立アプリ稼働を証明しない。F01/F06のWindows起動復帰とF04/F05/F08の最終受入は別Gateとして維持。
 
+## 2026-11-04｜PC実測による更新（後続の11/02表より優先）
+
+- **F02:** 統合Source `83b7060` の4アプリmodule SHAと稼働image内のSHAを照合し一致。再buildなしで既存 `bot_acceptance.verify(Controller())` の認証分離・202/duplicate/409・stop/start後SQLite保持・実Source一致がすべてPASS。独立apps既PASSは再実行なし。実Bot/Tumblr個別機能と旧imageへの復帰は別の未受入Gate。
+- **F01/F03/F06:** WSL systemd/Docker/containerd稼働、認証付きCore ready/files、SQLite quick_check、G:隔離一時dirでの保存/更新/ゴミ箱/復元/SHA/容量確認PASS。Windows reboot、USB断、容量枯渇、遠隔backup/復号/隔離復元は未実施。
+- **Docker操作の逆引き:** `scripts/local_docker.py` → `gserverctl.py` / `gserver_apps.py` / recovery / WSL audit。`tests/test_local_docker.py` はroot/既存socket権限/従来sudo fallback/明示local socketを検証。新規3件を含むPC全352 tests PASS。今回SourceのCIは未確認。
+- **優先順位:** 今回の直接Master指示によりKB/F04は後段。既存appの利用・データ保護・通信保護・復旧を優先し、正式認証を要するGateway/P015/Cloudflare/Vault/Terminalは所有契約を確認して進める。ローカルBotログ受入だけで実appや通信保護完成としない。[詳細・実行記録](../CURRENT.md)。
+
 ## 2026-11-02｜F01〜F08実行マッピング（現行PR #15 Source基準）
 
 この節は**新しい仕様・追加Stage・再実装指示ではない**。既存F01〜F08／S0〜S7・46タスクを、現在の Source → 依存 → 実証 → 未達 → rollback に結び直す。各Gateの「Source実装」「GitHub CI」「Owner PC Runtime」「外部Provider往復」「復旧」を**別々**に判定する。未実施をPASSにしない。上の初期表に残る古いUI必須・Docker未導入という表現より、最新FINAL_ACCEPTANCEと実機証拠を優先する。
