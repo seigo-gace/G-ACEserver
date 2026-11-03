@@ -27,7 +27,7 @@ F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Com
 
 - **F02:** 統合Source `83b7060` の4アプリmodule SHAと稼働image内のSHAを照合し一致。再buildなしで既存 `bot_acceptance.verify(Controller())` の認証分離・202/duplicate/409・stop/start後SQLite保持・実Source一致がすべてPASS。独立apps既PASSは再実行なし。実Bot/Tumblr個別機能と旧imageへの復帰は別の未受入Gate。
 - **F01/F03/F06:** WSL systemd/Docker/containerd稼働、認証付きCore ready/files、SQLite quick_check、G:隔離一時dirでの保存/更新/ゴミ箱/復元/SHA/容量確認PASS。Windows reboot、USB断、容量枯渇、遠隔backup/復号/隔離復元は未実施。
-- **Docker操作の逆引き:** `scripts/local_docker.py` → `gserverctl.py` / `gserver_apps.py` / recovery / WSL audit。`tests/test_local_docker.py` はroot/既存socket権限/従来sudo fallback/明示local socketを検証。新規3件を含むPC全352 tests PASS。今回SourceのCIは未確認。
+- **Docker操作の逆引き:** `scripts/local_docker.py` → `gserverctl.py` / `gserver_apps.py` / recovery / WSL audit。`tests/test_local_docker.py` はroot/既存socket権限/従来sudo fallback/明示local socketを検証。新規3件を含むPC全352 tests PASS。実装 `739a78d` の [CI Run 41673993937](https://github.com/seigo-gace/G-ACEserver/actions/runs/41673993937) はPython回帰/Core Docker/Bot Docker全step SUCCESS、PC証拠とは区別。
 - **優先順位:** 今回の直接Master指示によりKB/F04は後段。既存appの利用・データ保護・通信保護・復旧を優先し、正式認証を要するGateway/P015/Cloudflare/Vault/Terminalは所有契約を確認して進める。ローカルBotログ受入だけで実appや通信保護完成としない。[詳細・実行記録](../CURRENT.md)。
 
 ## 2026-11-02｜F01〜F08実行マッピング（現行PR #15 Source基準）
