@@ -1,3 +1,13 @@
+# 2026-11-05 Codex｜F03隔離障害復元・F01起動監査・F05 spool backup/restore
+
+- **F03:** `scripts/verify_storage_mutations_host.py`へ、合成領域だけのSHA不一致拒否、孤立`.gserver-part-*`検出/撤去、容量不足(errno 28)拒否、既存宛先衝突拒否、復元成功を追加。`ACTION=G_STORAGE_MUTATIONS_HOST_ISOLATED`、`BYTES_VERIFIED=1572900`、`USER_FILES_MODIFIED=NONE`、`VERIFY=PASS`。実G:/F:の破壊・媒体抜去は未実施。
+- **F01:** Windows read-only auditを実行し、`WSL_DIRECT_SCHEDULED_TASK_COUNT=0`、`CHANGES=NONE`、`VERIFY=PASS`。Windows自動起動の完全確認と実再起動からの復帰は`NOT_VERIFIED`。再起動・稼働中コンテナ停止は行っていない。
+- **F05:** Gserver所有のローカルBot SQLite spoolだけを対象に、128MiB上限、SQLite quick_check、AES-256-GCM、SHA256 manifest、0600 archive、鍵をmanifestへ保存しない隔離backup/verify/restoreを実装。外部TGserver/Gateway/Vault APIは呼び出さない。単体4件を含む重点30件、CLI create→verify→restore smoke、復元後pending=1をPASS。暗号機能がない環境は`BACKUP_CRYPTOGRAPHY_UNAVAILABLE`で停止し、未検証を成功扱いしない。
+- **境界:** 実TGserver通信/readback、実F:バックアップ、Cloudflare/VPN/Gateway/Vault設定、KB、全Host保守移行は未実施。既存dirty 4ファイルと`FETCH_HEAD`はcommit対象外で保全。全Python 387件は前回成功済みのため今回再実行していない。
+- **次Gate:** F03の実G: read-only中断診断、F01のWindows起動復帰契約、F05の実運用境界（正式な暗号依存とTGserver readback承認）を分離して確認する。Draft PR #15を維持し、未検証の実通信をPASSへ昇格しない。
+
+---
+
 # 2026-11-05 Codex｜Workspace整合・全Python回帰・F01/F03 read-only受入
 
 - **実装:** 非root Docker fallbackのVPN preflightが`sudo docker`を対話実行して全回帰を待機させる不具合を修正。`preflight`/`hints`を`sudo -n`へ統一し、`docker_access`の重複`-n`を整理。Gserver-owned変更は`3faafed0f5877014ac474d30607b677ba4b55a58`、PR #15 branchへpush済み。既存dirty 5項目はcommit対象外。
