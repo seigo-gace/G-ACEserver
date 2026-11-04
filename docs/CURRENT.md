@@ -1,3 +1,13 @@
+# 2026-11-05 Codex｜server-core共通Terminal Gserver target adapter
+
+- **主対象切替:** Gserver側の独立Terminal現物監査は完了し、現行正本に撤去対象がないことを確認。共通TerminalのSource実装はserver-core Control #10で行い、Gserver側は必要最小限のtarget-owned adapterだけを保持する。
+- **Gserver adapter:** `scripts/gserver_host_adapter.py`を追加。共通`host.command` requestのtarget/repository/repo SHA/command SHAをfail closedで検証し、既存正本rootでbounded commandを実行、request ID・repo SHA・host SHA・stdout/stderr SHAを返す。独立Dispatcher、固定コマンド一覧、network listener、Docker socket、Secret保存は追加していない。
+- **隔離検証:** `tests/test_gserver_host_adapter.py` 3件PASS（正常実行、repo SHA不一致、command改変拒否、Docker/listener/fixed menu不在）。既存F05 spool backup 4件、TGS bridge 32件も個別実行PASS。実Gateway配信・実Host admission・本番Gserver processへの組込は未実施。
+- **境界:** Gserver runtime、稼働中コンテナ、Gateway/Vault/Cloudflare、外部Secret、Asteraserverは変更していない。server-core側のtarget contract/送信相関は別RepoのControl #10 Sourceとして実装・CI登録する。Source/隔離PASSは実Request→Gserver Host→Result Sinkのlive PASSを意味しない。
+- **次Gate:** server-coreのGserver target Source CI、Gateway destination登録、Gserver receiverの正式Secret/readback、Host admission、Result Sink相関を順に確認し、承認されたread-only requestだけで実往復を行う。KBと全Host保守移行は保留。
+
+---
+
 # 2026-11-05 Codex｜共通ServerTerminal一本化の現物監査
 
 - **正式方針:** server-core Control #10の共通`host.command` / 正式Registryを唯一の通常指令経路とし、Gserver側に独立Terminal、固定コマンドDispatcher、Gateway clone、別Command Registryを持たせない。Gserver固有の製品Bot spool/Gateway writerはTerminalではないため保持する。
