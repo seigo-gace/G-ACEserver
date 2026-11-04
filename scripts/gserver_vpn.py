@@ -348,7 +348,7 @@ def inspect_local_image(image, privilege):
 def docker_access(privilege):
     try:
         if privilege:
-            run(privilege + ['-n', 'true'])
+            run(privilege + ['true'])
         run(privilege + ['docker', '--host', SOCKET, 'info'], timeout=30)
     except VPNError:
         return 'DOCKER_SUDO_AUTH_REQUIRED'
@@ -368,7 +368,7 @@ def local_image_status(image, privilege):
 
 
 def preflight(vpn_image, app_image=None, cloudflared_image=None):
-    privilege = [] if os.geteuid() == 0 else ['sudo']
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
     status = {'docker_access': docker_access(privilege)}
     status['vpn'] = local_image_status(vpn_image, privilege)
     if app_image:
@@ -392,7 +392,7 @@ def preflight(vpn_image, app_image=None, cloudflared_image=None):
 
 def hints():
     """Non-secret local inventory hints for building pinned image references."""
-    privilege = [] if os.geteuid() == 0 else ['sudo']
+    privilege = [] if os.geteuid() == 0 else ['sudo', '-n']
     if docker_access(privilege) != 'OK':
         return {'docker_access': 'DOCKER_SUDO_AUTH_REQUIRED'}
     out = {'docker_access': 'OK'}
