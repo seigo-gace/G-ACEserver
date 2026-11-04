@@ -1,5 +1,7 @@
 # 2026-11-05 Codex｜server-core共通Terminal Gserver target adapter
 
+- **最小Receiver境界:** `scripts/gserver_host_receiver.py` を追加。既存Gateway側で認証済みの共通イベントenvelopeだけを検査し、destination/event type/subject/event ID/target/repositoryを照合して、既存 `gserver_host_adapter.py` へ1件だけ委譲する。listener、共通Dispatcher、固定コマンド一覧、Secret保存、daemonは追加していない。
+- **Receiver隔離検証:** `tests/test_gserver_host_receiver.py` 3件PASS（正常なevent委譲、誤destination拒否、event ID不一致拒否）。Gateway HMAC検証、実Receiver配置、実Gateway配送は本番保護変更として未実施。
 - **主対象切替:** Gserver側の独立Terminal現物監査は完了し、現行正本に撤去対象がないことを確認。共通TerminalのSource実装はserver-core Control #10で行い、Gserver側は必要最小限のtarget-owned adapterだけを保持する。
 - **Gserver adapter:** `scripts/gserver_host_adapter.py`を追加。共通`host.command` requestのtarget/repository/repo SHA/command SHAをfail closedで検証し、既存正本rootでbounded commandを実行、request ID・repo SHA・host SHA・stdout/stderr SHAを返す。独立Dispatcher、固定コマンド一覧、network listener、Docker socket、Secret保存は追加していない。
 - **隔離検証:** `tests/test_gserver_host_adapter.py` 3件PASS（正常実行、repo SHA不一致、command改変拒否、Docker/listener/fixed menu不在）。既存F05 spool backup 4件、TGS bridge 32件も個別実行PASS。実Gateway配信・実Host admission・本番Gserver processへの組込は未実施。
