@@ -6,6 +6,14 @@
 
 ---
 
+# 2026-11-05 Codex｜中断転送ファイルの読み取り専用診断
+
+- **対象:** F03/F07。強制終了・USB切断で通常cleanupが走らなかった場合の `.gserver-part-*` を、Owner CLIの `partial-list` / `partial-info` で検出する。
+- **安全境界:** opaque ID・容量・SHA256と、単独孤立 `ORPHAN_INCOMPLETE` / 別hard linkあり `LINKED_COPY_REVIEW_REQUIRED` のみ表示。自動削除・公開・上書きは行わない。不正名・symlink・別deviceは対象外。
+- **次Gate:** 実G:で媒体断を伴わないread-only診断を先に確認し、削除は可視ファイル・receipt・hash照合後の別承認操作とする。
+
+---
+
 # 2026-11-04 Codex｜全project共通のdomain設定・切替/復元を実装
 
 - **Master要件:** 常用GserverはVideoBot専用ではなく、追加されるproject毎にdomainを設定/変更できること。既存app/Core/VPN/providerを維持し、公開名をapp Sourceへ固定しない。今回の対象は汎用の設定管理と切替準備。実DNS/Tunnel/Access/Webhookの変更先はまだ指定されておらず、本番切替は実施していない。
