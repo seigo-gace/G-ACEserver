@@ -73,16 +73,23 @@ def origin(value):
 
 
 def validate_policy(policy):
-    keys(policy, ('schema', 'projects'))
+    keys(policy, ('schema', 'projects'), ('server_domain',))
     require(policy['schema'] == SCHEMA and isinstance(policy['projects'], dict) and policy['projects'], 'POLICY_INVALID')
     policy = copy.deepcopy(policy)
+    server_domain = policy.get('server_domain')
+    if server_domain is not None:
+        policy['server_domain'] = hostname(server_domain)
     owners = {}
     for project, config in policy['projects'].items():
         require(isinstance(project, str) and SLUG.fullmatch(project), 'INVALID_PROJECT')
-        keys(config, ('repository', 'zones', 'endpoints'))
+        keys(config, ('repository', 'endpoints'), ('zones',))
         require(isinstance(config['repository'], str) and re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', config['repository']), 'INVALID_REPOSITORY')
-        require(isinstance(config['zones'], list) and config['zones'], 'ZONES_REQUIRED')
-        config['zones'] = sorted(set(hostname(zone) for zone in config['zones']))
+        zones = config.get('zones')
+        if zones is None:
+            require(server_domain is not None, 'ZONES_REQUIRED')
+            zones = [policy['server_domain']]
+        require(isinstance(zones, list) and zones, 'ZONES_REQUIRED')
+        config['zones'] = sorted(set(hostname(zone) for zone in zones))
         require(isinstance(config['endpoints'], dict) and config['endpoints'], 'ENDPOINTS_REQUIRED')
         for endpoint, contract in config['endpoints'].items():
             require(isinstance(endpoint, str) and SLUG.fullmatch(endpoint), 'INVALID_ENDPOINT')
@@ -116,14 +123,19 @@ def compile_bindings(policy, bindings):
     require(isinstance(bindings, list), 'INVALID_BINDINGS')
     normalized, tunnels, callbacks, identities, hosts = [], {}, [], set(), set()
     for binding in bindings:
-        keys(binding, ('project', 'endpoint', 'hostname'), ('aliases',))
+        keys(binding, ('project', 'endpoint'), ('hostname', 'aliases'))
         project, endpoint = binding['project'], binding['endpoint']
         require(isinstance(project, str) and project in policy['projects'], 'PROJECT_NOT_REGISTERED')
         config = policy['projects'][project]
         require(isinstance(endpoint, str) and endpoint in config['endpoints'], 'ENDPOINT_NOT_REGISTERED')
         require((project, endpoint) not in identities, 'DUPLICATE_ENDPOINT')
         identities.add((project, endpoint))
-        primary = hostname(binding['hostname'])
+        if 'hostname' in binding:
+            primary = hostname(binding['hostname'])
+        else:
+            require(policy.get('server_domain'), 'SERVER_DOMAIN_REQUIRED')
+            prefix = project if len(config['endpoints']) == 1 else endpoint + '.' + project
+            primary = hostname(prefix + '.' + policy['server_domain'])
         aliases = binding.get('aliases', [])
         require(isinstance(aliases, list) and len(aliases) <= 10, 'INVALID_ALIASES')
         aliases = sorted(set(hostname(alias) for alias in aliases) - {primary})

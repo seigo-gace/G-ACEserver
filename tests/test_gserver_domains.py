@@ -15,7 +15,7 @@ import gserver_domains as d
 
 
 def policy():
-    return {'schema': d.SCHEMA, 'projects': {
+    return {'schema': d.SCHEMA, 'server_domain': 'g-acebot.com', 'projects': {
         'videobot': {'repository': 'owner/create-videobot', 'zones': ['example.com', 'example.net'],
             'endpoints': {'webhook': {'origin': 'http://127.0.0.1:8080',
                 'tunnel': '00000000-0000-0000-0000-000000000001',
@@ -56,6 +56,42 @@ class DomainTests(unittest.TestCase):
         config['projects']['another-app']['endpoints']['webhook']['tunnel'] = '00000000-0000-0000-0000-000000000003'
         bindings = routes() + [{'project': 'another-app', 'endpoint': 'webhook', 'hostname': 'other.example.com'}]
         self.assertEqual(len(d.compile_bindings(config, bindings)['bindings']), 3)
+
+    def test_project_without_domain_uses_server_domain(self):
+        config = copy.deepcopy(self.policy)
+        config['projects']['videobot'].pop('zones')
+        compiled = d.compile_bindings(config, [
+            {'project': 'videobot', 'endpoint': 'webhook'},
+        ])
+        self.assertEqual(compiled['bindings'][0]['hostname'], 'videobot.g-acebot.com')
+        self.assertEqual(compiled['callbacks'][0]['urls'],
+                         ['https://videobot.g-acebot.com/telegram/webhook'])
+
+    def test_explicit_project_domain_overrides_server_default(self):
+        compiled = d.compile_bindings(self.policy, [routes()[0]])
+        self.assertEqual(compiled['bindings'][0]['hostname'], 'video.example.com')
+
+    def test_multiple_endpoints_get_distinct_default_hosts(self):
+        config = copy.deepcopy(self.policy)
+        project = config['projects']['videobot']
+        project.pop('zones')
+        project['endpoints']['status'] = copy.deepcopy(project['endpoints']['webhook'])
+        project['endpoints']['status']['origin'] = 'http://127.0.0.1:8082'
+        project['endpoints']['status']['tunnel'] = '00000000-0000-0000-0000-000000000003'
+        compiled = d.compile_bindings(config, [
+            {'project': 'videobot', 'endpoint': 'webhook'},
+            {'project': 'videobot', 'endpoint': 'status'},
+        ])
+        self.assertEqual([binding['hostname'] for binding in compiled['bindings']], [
+            'status.videobot.g-acebot.com',
+            'webhook.videobot.g-acebot.com',
+        ])
+
+    def test_missing_domain_and_server_default_is_rejected(self):
+        config = copy.deepcopy(self.policy)
+        config.pop('server_domain')
+        with self.assertRaisesRegex(d.DomainError, 'SERVER_DOMAIN_REQUIRED'):
+            d.compile_bindings(config, [{'project': 'videobot', 'endpoint': 'webhook'}])
 
     def test_switch_keeps_old_host_other_project_and_auth(self):
         first = self.store.prepare(self.policy, routes(), None)

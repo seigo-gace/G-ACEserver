@@ -1,5 +1,6 @@
 {
   "schema": "gserver.domains.v1",
+  "server_domain": "g-acebot.com",
   "projects": {
     "videobot": {
       "repository": "seigo-gace/create-videobot",

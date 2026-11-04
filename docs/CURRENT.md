@@ -1,3 +1,11 @@
+# 2026-11-05 Codex｜Gserver既定domainとPJ指定domainを分離
+
+- **Master要件:** KBは完成直前まで保留。PJがdomainを指定しない場合は `g-acebot.com` をGserverの既定domainとし、PJが指定した場合は既存の安全な切替・復元を使用する。追加設計は既存資産または追加課金のない構成に限定する。
+- **Source変更:** domain policyへ任意の `server_domain` を追加。PJ bindingにhostnameがない場合は、衝突を避けて単一endpointを `<project>.g-acebot.com`、複数endpointを `<endpoint>.<project>.g-acebot.com` とする。PJの明示hostnameは従来どおり優先し、許可zone・認証・callback・revision・rollback検査を維持する。apex `g-acebot.com` は任意PJへ自動割当せず、Gserver正式入口の確認後に明示bindingする。
+- **境界:** Source/desired-stateのみ。本番DNS、Tunnel、Access、callback、実コンテナは変更していない。既存domain切替のlive GateとF01〜F08未完了を維持する。
+
+---
+
 # 2026-11-04 Codex｜全project共通のdomain設定・切替/復元を実装
 
 - **Master要件:** 常用GserverはVideoBot専用ではなく、追加されるproject毎にdomainを設定/変更できること。既存app/Core/VPN/providerを維持し、公開名をapp Sourceへ固定しない。今回の対象は汎用の設定管理と切替準備。実DNS/Tunnel/Access/Webhookの変更先はまだ指定されておらず、本番切替は実施していない。

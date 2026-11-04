@@ -23,6 +23,10 @@ TASK_ID / COMPONENT_ID / SYMPTOM / DEPENDENCIES / PROCESS_OR_SERVICE / SOURCE_PA
 
 F02/S2の個別アプリ管理は `scripts/gserver_apps.py`（アプリ所有Compose→`gace-app-<name>`）。Core/API/Storageの既存 `scripts/gserverctl.py` とプロジェクト・volumeを分離する。検証は `tests/test_gserver_apps.py` と `tests/test_gserver_apps_smoke.py`、実機受入は `scripts/smoke_gserver_apps_host.sh` → `scripts/smoke_gserver_apps_host.py`。操作・症状・復旧対応は [APPS_RUNTIME](APPS_RUNTIME.md)。F05のBotログspool/Gateway連携は保持するが、F02の独立アプリ稼働を証明しない。F01/F06のWindows起動復帰とF04/F05/F08の最終受入は別Gateとして維持。
 
+## 2026-11-05｜Gserver既定domain（F02/F06/F07）
+
+`g-acebot.com` をpolicyの `server_domain` とし、PJがhostnameを指定しない場合は衝突しないPJ/endpoint subdomainをdesired-stateへ生成する。PJ明示domainは従来どおり優先し、許可zone・認証・callback・revision・rollbackの境界を維持する。apexは自動で任意PJへ割り当てず、本番Provider変更は別Gate。
+
 ## 2026-11-04｜全project共通domain設定（F02/F06/F07）
 
 入口 `scripts/gserver_domains.py`、owner/zone/endpointとbindingのprivate JSON → hash付きdesired revision → project/Tunnel別ingress。新project追加/旧host併存切替/取消済みzone拒否/認証保持/競合防止/復元は `tests/test_gserver_domains.py` の19件、全380 tests PASS。`scripts/verify_gserver_domains_host.py` は既存cloudflaredのnetwork noneで架空domainのnative設定/新旧route/未知host404/rollbackと既存container不変PASS。実装 `406c967` の [CI Run 41734067150](https://github.com/seigo-gace/G-ACEserver/actions/runs/41734067150) SUCCESS（Python/Core/Bot Docker、native domain auditはPC証拠）。本番DNS/Tunnel/Access/callback反映は未実施、live=NOT_VERIFIED。コードを変更せず任意projectのdomain設定を差替え可能。[操作/境界](APPS_RUNTIME.md#project-domain-configuration)。
