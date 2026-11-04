@@ -1,3 +1,14 @@
+# 2026-11-05 Codex｜Workspace整合・全Python回帰・F01/F03 read-only受入
+
+- **実装:** 非root Docker fallbackのVPN preflightが`sudo docker`を対話実行して全回帰を待機させる不具合を修正。`preflight`/`hints`を`sudo -n`へ統一し、`docker_access`の重複`-n`を整理。Gserver-owned変更は`3faafed0f5877014ac474d30607b677ba4b55a58`、PR #15 branchへpush済み。既存dirty 5項目はcommit対象外。
+- **Workspace:** `/home/gace/server-core`、`/home/gace/workspace/G-ACE.code-workspace`、`/home/gace/Project`の2-root adapterを確認。3つの不足参照を既存内容保持・owner/hash/権限退避後に最小挿入し、`gserver_workspace.py`は`WORKSPACE_LAYOUT=PASS`、`RULE_ROUTING=FILES_VERIFIED`。client rule loadingとremote Host admissionは未検証。
+- **Test:** VPN 43件、Workspace 10件を再実行してPASS。全Python回帰は**387 tests / 71.397s / OK**。
+- **PC Runtime:** F01 read-only auditはWSL systemd/Docker/Compose/Core stackについてPASS。Windows autostart・Windows reboot recoveryはNOT_VERIFIED。Recovery read-onlyはcontainer healthy、owner storage、SQLite quick check PASSだが、完全復元はNOT_COMPLETE。F03 read-onlyはG: mount/files/quota PASS、USB disconnect/capacity exhaustionはNOT_RUN、partial-listは0件。
+- **境界:** 本番コンテナ停止/再配置、G:/F:破壊、Cloudflare/DNS/Access/VPN live変更、Gateway/Vault/TGserver提供元変更、KB、全Host保守移行は未実施。
+- **次Gate:** USB断を伴わない隔離転送/restore異常系、Windows→WSL→Docker起動復帰の実証可能範囲、VPN/Cloudflare正式接続境界、TGserver backup/restoreを依存順に進める。
+
+---
+
 # 2026-11-05 Codex｜Gserver既定domainとPJ指定domainを分離
 
 - **Master要件:** KBは完成直前まで保留。PJがdomainを指定しない場合は `g-acebot.com` をGserverの既定domainとし、PJが指定した場合は既存の安全な切替・復元を使用する。追加設計は既存資産または追加課金のない構成に限定する。
