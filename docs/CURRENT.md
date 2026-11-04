@@ -1,3 +1,14 @@
+# 2026-11-05 Codex｜共通ServerTerminal一本化の現物監査
+
+- **正式方針:** server-core Control #10の共通`host.command` / 正式Registryを唯一の通常指令経路とし、Gserver側に独立Terminal、固定コマンドDispatcher、Gateway clone、別Command Registryを持たせない。Gserver固有の製品Bot spool/Gateway writerはTerminalではないため保持する。
+- **Gserver正本監査:** 現在のHEAD `ddc6a28f219cf9abb24220955b5bcd639cddee44` とdirty状態を確認。現在の正本ツリーには`chat_host_*`、`CHAT_GSERVER_HOST_ROUTE.md`、Terminal/Receiver/Writer/Dispatcherの独立実装は存在しない。過去の別Composerブランチに存在する`chat_host_*`群は現在の正本PRへ未取り込みであり、正本側から削除する対象はなかった。過去ブランチやremote refの削除は行っていない。
+- **共通契約:** `/home/gace/server-core` HEAD `8ef6c8eb2a19fba189fcc27a1d420bc24bf1bbd8` のRegistryは通常CHATを`host.command`/`dev.job`へ限定し、`seigo-gace/G-ACEserver`および`/home/gace/Project/Gserver/repository`を登録していない。したがってGserver向けHost target/admission/Receiver/Writer/Sinkの接続は`NOT_VERIFIED`であり、未登録を接続済みとは扱わない。
+- **隔離検証:** server-coreのbounded host transport 18件、result poll 13件、workspace command-center 11件がPASS。共通Senderのrequest/command SHA形式、host.command受理形式、結果照合、Workspace拒否境界をSource/隔離環境で確認した。これはAsteraserver実機またはGserver実機の往復証拠ではない。
+- **Host read-only:** Gserverコンテナ`gace-gserver-gserver-1`はhealthy、公開は`127.0.0.1:18765`のみ。実行中サービスの停止・再配置、Asteraserver、Gateway/Vault/Cloudflare、権限・Secretは変更していない。
+- **次Gate:** server-core Control #10の所有者がGserver Host target、登録root、独立認証配送、Gserver薄型Receiver/Writer、Result Sink、rollbackを正式Registryへ追加し、Asteraserver既存経路の回帰と実request相関（request ID / run / target SHA / dispatcher SHA / command SHA / exit / stdout hash）を受入すること。共通側の登録・認証・Asteraserver変更はGserver PRから勝手にコピー/代替実装しない。Gserver本体F01〜F08は並行継続する。
+
+---
+
 # 2026-11-05 Codex｜F03隔離障害復元・F01起動監査・F05 spool backup/restore
 
 - **F03:** `scripts/verify_storage_mutations_host.py`へ、合成領域だけのSHA不一致拒否、孤立`.gserver-part-*`検出/撤去、容量不足(errno 28)拒否、既存宛先衝突拒否、復元成功を追加。`ACTION=G_STORAGE_MUTATIONS_HOST_ISOLATED`、`BYTES_VERIFIED=1572900`、`USER_FILES_MODIFIED=NONE`、`VERIFY=PASS`。実G:/F:の破壊・媒体抜去は未実施。
