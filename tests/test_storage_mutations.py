@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 from storage import Storage, InvalidPath
-from storage_mutations import digest, quota, to_trash, restore, trash_list, trash_info, replace_version, purge
+from storage_mutations import (digest, quota, to_trash, restore, trash_list, trash_info,
+                               partial_list, partial_info, replace_version, purge)
 
 
 class Mutations(unittest.TestCase):
@@ -175,6 +176,38 @@ class Mutations(unittest.TestCase):
                 to_trash(self.store, 'original.txt', sha)
         self.assertEqual(f.read_bytes(), b'valuable')
         self.assertEqual(trash_list(self.store)['entries'], [])
+
+    def test_interrupted_partial_is_visible_without_deletion(self):
+        token = 'a' * 32
+        partial = self.root / ('.gserver-part-' + token)
+        partial.write_bytes(b'incomplete-transfer')
+        listing = partial_list(self.store)
+        self.assertEqual(listing, {'entries': [{
+            'partial_id': token,
+            'bytes': len(b'incomplete-transfer'),
+            'state': 'ORPHAN_INCOMPLETE',
+        }], 'truncated': False})
+        info = partial_info(self.store, token)
+        self.assertEqual(info['sha256'], hashlib.sha256(b'incomplete-transfer').hexdigest())
+        self.assertEqual(info['state'], 'ORPHAN_INCOMPLETE')
+        self.assertEqual(partial.read_bytes(), b'incomplete-transfer')
+
+    def test_published_partial_link_requires_review(self):
+        token = 'b' * 32
+        partial = self.root / ('.gserver-part-' + token)
+        partial.write_bytes(b'published')
+        os.link(partial, self.root / 'published.bin')
+        self.assertEqual(partial_info(self.store, token)['state'], 'LINKED_COPY_REVIEW_REQUIRED')
+        self.assertEqual(partial_list(self.store)['entries'][0]['state'], 'LINKED_COPY_REVIEW_REQUIRED')
+
+    def test_partial_inventory_ignores_untrusted_names_and_links(self):
+        (self.root / '.gserver-part-not-a-token').write_bytes(b'x')
+        outside = self.drive / 'outside'
+        outside.write_bytes(b'y')
+        (self.root / ('.gserver-part-' + 'c' * 32)).symlink_to(outside)
+        self.assertEqual(partial_list(self.store), {'entries': [], 'truncated': False})
+        with self.assertRaises(InvalidPath):
+            partial_info(self.store, '../bad')
 
 
 

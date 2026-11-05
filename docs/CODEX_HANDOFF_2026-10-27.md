@@ -1,5 +1,8 @@
 # Gserver → Codex 開発引継ぎ（2026-10-27 JST）
 
+> **2026-10-30補正:** 本文は履歴。現在の目的・優先順位・実機状態は [CURRENT](CURRENT.md) と [Issue #9引継ぎ](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6513092077)を優先。汎用独立アプリの運用を先行し、管理Web UIは不要。保護境界とF01〜F08は維持する。
+
+
 > **現行実行用の引継ぎ。** Masterがこの会話で、Gserver開発の実装・デバッグ・テスト・安全なローカル統合を、VS CodeのCodex（WSL Ubuntu）に一度まとめて委任した。これはCodexの**対話セッション内のGserver限定作業許可**であり、Codexタスクの定期自動実行、別Agent/Server AIの起動、PRの自動レビュー、課金を伴う常時ジョブ、別Hostの本番変更の許可ではない。
 
 ## 1. 正本と実行者ルール

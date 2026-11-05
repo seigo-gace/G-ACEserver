@@ -5,6 +5,7 @@ services:
     pull_policy: never
     network_mode: none
     environment:
+      GSERVER_AUTH_FILE: /var/lib/gserver/auth-token
       GSERVER_BOT_SPOOL_DIR: /var/lib/gserver/bot-spool
       GSERVER_BOT_AUTH_FILE: /var/lib/gserver/bot-auth-token
     read_only: true

@@ -10,6 +10,7 @@ import stat
 from storage import InvalidPath, StorageUnavailable, components
 
 TRASH = '.gserver-trash'
+PARTIAL = '.gserver-part-'
 CHUNK = 1024 * 1024
 
 
@@ -209,6 +210,63 @@ def trash_info(store, token):
                 os.close(fd)
         finally:
             os.close(trash_fd)
+
+
+def _partial_name(token):
+    if not isinstance(token, str) or len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+        raise InvalidPath()
+    return PARTIAL + token
+
+
+def partial_list(store, limit=100):
+    """Read-only inventory of interrupted transfer artifacts.
+
+    A link count of one is an unpublished orphan. A higher count may be the
+    temporary name left after a successful publish; it requires review and is
+    never removed by this inspection API.
+    """
+    if not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError('invalid partial list limit')
+    with store.directory() as folder:
+        root_dev = os.fstat(folder).st_dev
+        items = []
+        with os.scandir(folder) as entries:
+            for index, item in enumerate(entries):
+                if index >= 10000:
+                    raise StorageUnavailable()
+                if not item.name.startswith(PARTIAL):
+                    continue
+                token = item.name[len(PARTIAL):]
+                if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+                    continue
+                info = item.stat(follow_symlinks=False)
+                if not stat.S_ISREG(info.st_mode) or info.st_dev != root_dev:
+                    continue
+                items.append({'partial_id': token, 'bytes': info.st_size,
+                              'state': 'ORPHAN_INCOMPLETE' if info.st_nlink == 1
+                              else 'LINKED_COPY_REVIEW_REQUIRED'})
+        items.sort(key=lambda item: item['partial_id'])
+        return {'entries': items[:limit], 'truncated': len(items) > limit}
+
+
+def partial_info(store, token):
+    name = _partial_name(token)
+    with store.directory() as folder:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_dev != os.fstat(folder).st_dev:
+                raise InvalidPath()
+            sha, size = _hash_fd(fd)
+            after = os.fstat(fd)
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_nlink) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_nlink):
+                raise ValueError('partial changed during inspection')
+            return {'partial_id': token, 'bytes': size, 'sha256': sha,
+                    'state': 'ORPHAN_INCOMPLETE' if before.st_nlink == 1
+                    else 'LINKED_COPY_REVIEW_REQUIRED'}
+        finally:
+            os.close(fd)
 
 
 def _copy_new_version(source_fd, parent_fd, stage, size, max_bytes, reserve_bytes):

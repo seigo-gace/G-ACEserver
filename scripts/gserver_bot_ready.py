@@ -20,7 +20,7 @@ MIN_AVAILABLE_BYTES = 2 * 1024 ** 3
 
 
 def run_tests():
-    for pattern in ("test_tgs_bridge.py", "test_runtime.py", "test_gserver_bot_ready_contract.py"):
+    for pattern in ("test_tgs_bridge.py", "test_runtime.py", "test_gserver_bot_ready_contract.py", "test_bot_acceptance.py"):
         result = subprocess.run(
             [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests",
              "-p", pattern, "-q"], cwd=ROOT, check=False, timeout=180)
@@ -30,7 +30,13 @@ def run_tests():
 
 
 def docker_preflight(controller):
-    reported = controller.run(["info", "--format", "{{.DockerRootDir}}"], capture=True)
+    try:
+        reported = controller.run(["info", "--format", "{{.DockerRootDir}}"], capture=True)
+    except subprocess.CalledProcessError as error:
+        # Do not echo daemon output, command arguments or private configuration.
+        if "password is required" in (error.stderr or ""):
+            raise RuntimeError("DOCKER_SUDO_AUTH_REQUIRED") from None
+        raise RuntimeError("DOCKER_LOCAL_ACCESS_FAILED") from None
     docker_root = Path(reported.stdout.strip())
     if not docker_root.is_absolute() or not docker_root.is_dir() or docker_root.is_symlink():
         raise RuntimeError("DOCKER_ROOT_UNKNOWN")
@@ -69,9 +75,26 @@ def install():
             control.activate(image)
         if control.load().get("access") != "loopback":
             control.action("enable-local")
-        control.action("bot-init")
-        control.action("bot-smoke")
-        control.action("bot-status")
+        try:
+            control.action("bot-init")
+            control.ensure_token()
+            control.action("bot-smoke")
+            from bot_acceptance import verify
+            verify(control)
+            control.action("bot-status")
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+            # Activation health alone cannot accept a broken Bot release.
+            # Restore the prior image AND access/storage profile; retain volumes.
+            if release.get("current"):
+                control.activate(release["current"],
+                                 access=release.get("access", "isolated"),
+                                 storage=release.get("storage", False))
+                control.save(release)
+                print("BOT_ACCEPTANCE_ROLLBACK=PREVIOUS_RELEASE_RESTORED")
+            else:
+                control.action("stop")
+                print("BOT_ACCEPTANCE_ROLLBACK=NEW_INSTALL_STOPPED_VOLUME_RETAINED")
+            raise
     print("BOT_GSERVER_LOCAL=PASS")
     print("BOT_GATEWAY_REMOTE=NOT_VERIFIED")
     print("TGSERVER_TELEGRAM_RAW_SEARCH=NOT_VERIFIED")
@@ -82,7 +105,7 @@ def main():
     parser.add_argument("--install", action="store_true",
                         help="Explicitly permit Docker build and Gserver activation")
     args = parser.parse_args()
-    print("========== GACE_RESULT_BEGIN ==========")
+    print("========== GACE_RESULT_BEGIN ==========", flush=True)
     print("PROJECT=Gserver")
     print("ACTION=BOT_READY_LOCAL_ACCEPTANCE")
     try:

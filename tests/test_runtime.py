@@ -21,6 +21,7 @@ app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
 spec = importlib.util.spec_from_file_location("ctl", ROOT / "scripts/gserverctl.py")
 ctl = importlib.util.module_from_spec(spec)
+sys.modules["ctl"] = ctl  # unittest.mock.patch resolves this import name
 spec.loader.exec_module(ctl)
 
 
@@ -239,6 +240,145 @@ class LifecycleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.controller.action("bot-gateway-config")
             runner.assert_not_called()
+
+    def test_gateway_preflight_executes_only_negative_validation_probe(self):
+        payload = json.dumps({"url": "https://private.example", "token": "x" * 32})
+        completed = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\n")
+        with patch("ctl.subprocess.run", return_value=completed) as runner:
+            self.controller.bot_gateway_preflight(payload)
+        self.assertEqual(runner.call_count, 1)
+        arguments = runner.call_args.args[0]
+        self.assertEqual(arguments[-2], "-c")
+        probe = arguments[-1]
+        compile(probe, "<gateway-negative-auth-preflight>", "exec")
+        self.assertIn("data=b'{}'", probe)
+        self.assertIn("answer.get('error')!='invalid internal event'", probe)
+        self.assertIn("_NoGatewayRedirect", probe)
+        self.assertIn("GATEWAY_USER_AGENT", probe)
+        self.assertNotIn("x" * 32, str(arguments))
+        self.assertEqual(runner.call_args.kwargs["input"], payload)
+
+    def test_single_gateway_canary_never_saves_config_or_claims_queue(self):
+        self.controller.save({"current": self.old})
+        reference = "gserver:gserver-probe:probe-" + "a" * 32
+        output = "PRODUCER_EVENT_ID=" + reference + "\nGATEWAY_CANARY_202=PASS\n"
+        result = subprocess.CompletedProcess([], 0, stdout=output)
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight") as preflight, \
+             patch("ctl.subprocess.run", return_value=result) as runner:
+            self.controller.action("bot-gateway-canary")
+        preflight.assert_called_once()
+        runner.assert_called_once()
+        self.assertEqual(runner.call_args.kwargs["input"], preflight.call_args.args[0])
+        command = runner.call_args.args[0]
+        self.assertEqual(command[-2], "-c")
+        compile(command[-1], "<single-gateway-canary>", "exec")
+        self.assertIn("send_gateway", command[-1])
+        self.assertNotIn("BotSpool", command[-1])
+        self.assertNotIn("gateway-url", command[-1])
+        self.assertNotIn("cf-secret-5678", str(command))
+
+    def test_gateway_canary_preflight_failure_stops_before_event(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight", side_effect=ValueError("auth failure")), \
+             patch("ctl.subprocess.run") as runner:
+            with self.assertRaises(ValueError):
+                self.controller.action("bot-gateway-canary")
+            runner.assert_not_called()
+
+    def test_gateway_preflight_passes_access_service_headers_separately(self):
+        payload = json.dumps({
+            "url": "https://private.example", "token": "z" * 32,
+            "access_id": "cf-client-id-1234", "access_secret": "cf-secret-5678",
+        })
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_AUTH_SCHEMA_PREFLIGHT=PASS\n")
+        with patch("ctl.subprocess.run", return_value=result) as runner:
+            self.controller.bot_gateway_preflight(payload)
+        script = runner.call_args.args[0][-1]
+        compile(script, "<access-preflight>", "exec")
+        self.assertIn("CF-Access-Client-Id", script)
+        self.assertIn("CF-Access-Client-Secret", script)
+        self.assertIn("Authorization", script)
+        self.assertNotIn("cf-secret-5678", script)
+        self.assertEqual(runner.call_args.kwargs["input"], payload)
+
+    def test_gateway_config_accepts_optional_access_pair_without_cli_secret(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["z" * 32, "cf-client-id-1234", "cf-secret-5678"]), \
+             patch.object(self.controller, "bot_gateway_preflight") as preflight, \
+             patch("ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")) as writer:
+            self.controller.action("bot-gateway-config")
+        self.assertEqual(preflight.call_count, 1)
+        passed = json.loads(preflight.call_args.args[0])
+        self.assertEqual(passed["access_id"], "cf-client-id-1234")
+        self.assertEqual(passed["access_secret"], "cf-secret-5678")
+        self.assertIn("gateway-access-client-id", writer.call_args.args[0][-1])
+        self.assertIn("gateway-access-client-secret", writer.call_args.args[0][-1])
+        self.assertNotIn("cf-secret-5678", str(writer.call_args.args[0]))
+        self.assertEqual(writer.call_args.kwargs["input"], preflight.call_args.args[0])
+
+    def test_gateway_config_preflight_failure_never_saves_or_sends_queue(self):
+        self.controller.save({"current": self.old})
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", return_value="x" * 32), \
+             patch.object(self.controller, "bot_gateway_preflight",
+                          side_effect=ValueError("private gateway unavailable")) as probe, \
+             patch("ctl.subprocess.run") as runner:
+            with self.assertRaises(ValueError):
+                self.controller.action("bot-gateway-config")
+            probe.assert_called_once()
+            runner.assert_not_called()
+
+    def test_gateway_config_writer_uses_lock_and_incomplete_marker(self):
+        self.controller.save({"current": self.old})
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", side_effect=["x" * 32, "",]), \
+             patch.object(self.controller, "bot_gateway_preflight"), \
+             patch("ctl.subprocess.run", return_value=result) as writer:
+            self.controller.action("bot-gateway-config")
+        script = writer.call_args.args[0][-1]
+        compile(script, "<atomic-gateway-config>", "exec")
+        self.assertIn("gateway_configuration_lock(shared=False)", script)
+        self.assertIn("GATEWAY_CONFIG_INCOMPLETE", script)
+        self.assertIn("os.O_NOFOLLOW", script)
+        self.assertLess(script.index("os.open(marker"), script.index("for label,name"))
+        self.assertLess(script.index("for label,name"), script.index("os.unlink(marker)"))
+        self.assertNotIn("x" * 32, str(writer.call_args.args[0]))
+
+    def test_gateway_worker_never_flushes_with_incomplete_config_marker(self):
+        from contextlib import nullcontext
+        class Once:
+            done = False
+            def is_set(self): return self.done
+            def wait(self, _time): self.done = True
+        with tempfile.TemporaryDirectory() as temp:
+            marker = Path(temp) / "gateway-config-incomplete"
+            marker.write_text("")
+            with patch.object(app, "BOT_SPOOL_DIR", str(Path(temp) / "spool")), \
+                 patch.object(app, "GATEWAY_CONFIG_INCOMPLETE", str(marker)), \
+                 patch.object(app, "gateway_configuration_lock", return_value=nullcontext()), \
+                 patch.object(app, "flush_once") as deliver:
+                app.bot_gateway_worker(Once())
+                deliver.assert_not_called()
+
+    def test_gateway_config_saves_only_after_preflight_passes(self):
+        self.controller.save({"current": self.old})
+        result = subprocess.CompletedProcess([], 0, stdout="GATEWAY_PRIVATE_CONFIG=SET\n")
+        with patch("builtins.input", return_value="https://private.example"), \
+             patch("ctl.getpass.getpass", return_value="x" * 32), \
+             patch.object(self.controller, "bot_gateway_preflight") as probe, \
+             patch("ctl.subprocess.run", return_value=result) as writer:
+            self.controller.action("bot-gateway-config")
+        probe.assert_called_once()
+        writer.assert_called_once()
+        self.assertNotIn("x" * 32, str(writer.call_args.args[0]))
+        self.assertEqual(json.loads(writer.call_args.kwargs["input"])["url"],
+                         "https://private.example")
 
     def test_update_and_rollback_persist_immutable_versions(self):
         self.controller.save({'current': self.old})

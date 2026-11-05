@@ -7,7 +7,8 @@ import tempfile
 
 from gserver_files import DRIVE, FILES, put, get
 from storage import Storage, StorageUnavailable
-from storage_mutations import digest, quota, replace_version, to_trash, restore, trash_list
+from storage_mutations import (digest, quota, replace_version, to_trash, restore, trash_list,
+                                partial_list, partial_info)
 
 
 def run(mount=DRIVE, files=FILES):
@@ -26,15 +27,46 @@ def run(mount=DRIVE, files=FILES):
             source.write_bytes(os.urandom(1024 * 1024 + 17))
             original = put(str(source), mount, Path(isolated), reserve_bytes=0)
             assert digest(scoped, 'sample.bin')['sha256'] == original['sha256']
+            try:
+                to_trash(scoped, 'sample.bin', '0' * 64)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('hash mismatch was accepted')
+            assert digest(scoped, 'sample.bin')['sha256'] == original['sha256']
+            partial_token = 'a' * 32
+            partial_path = Path(isolated) / ('.gserver-part-' + partial_token)
+            partial_path.write_bytes(b'interrupted-transfer')
+            listed = partial_list(scoped)['entries']
+            assert listed == [{'partial_id': partial_token, 'bytes': 20, 'state': 'ORPHAN_INCOMPLETE'}]
+            inspected = partial_info(scoped, partial_token)
+            assert inspected['state'] == 'ORPHAN_INCOMPLETE'
+            partial_path.unlink()
             replacement = Path(incoming) / 'updated.bin'
             replacement.write_bytes(os.urandom(512 * 1024 + 19))
             with open(replacement, 'rb') as stream:
+                try:
+                    replace_version(scoped, 'sample.bin', stream.fileno(), original['sha256'], reserve_bytes=10**18)
+                except OSError as error:
+                    assert error.errno == 28
+                else:
+                    raise AssertionError('capacity reservation failure was accepted')
+                assert digest(scoped, 'sample.bin')['sha256'] == original['sha256']
                 changed = replace_version(scoped, 'sample.bin', stream.fileno(), original['sha256'], reserve_bytes=0)
             assert changed['old_sha256'] == original['sha256']
             assert digest(scoped, 'sample.bin')['sha256'] == changed['sha256']
             assert len(trash_list(scoped)['entries']) == 1
             deleted = to_trash(scoped, 'sample.bin', changed['sha256'])
             assert scoped.listing()['entries'] == []
+            Path(isolated, 'sample.bin').write_bytes(b'collision')
+            try:
+                restore(scoped, deleted['restore_id'], 'sample.bin', changed['sha256'])
+            except FileExistsError:
+                pass
+            else:
+                raise AssertionError('restore overwrote existing destination')
+            assert Path(isolated, 'sample.bin').read_bytes() == b'collision'
+            Path(isolated, 'sample.bin').unlink()
             restored = restore(scoped, deleted['restore_id'], 'sample.bin', changed['sha256'])
             assert restored['sha256'] == changed['sha256']
             with tempfile.TemporaryDirectory(prefix='gserver-dl-') as downloads:

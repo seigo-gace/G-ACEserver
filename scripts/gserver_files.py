@@ -12,7 +12,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from storage import Storage, InvalidPath, StorageUnavailable, components
-from storage_mutations import digest, quota, to_trash, restore as restore_trashed, trash_list, trash_info, replace_version, purge
+from storage_mutations import (digest, quota, to_trash, restore as restore_trashed,
+                               trash_list, trash_info, partial_list, partial_info,
+                               replace_version, purge)
 
 DRIVE = Path("/mnt/g")
 FILES = DRIVE / "GserverStorage" / "files"
@@ -159,6 +161,9 @@ def main():
     group.add_parser("trash-list", help="List up to 100 opaque recovery ids, without reading large video files")
     info = group.add_parser("trash-info", help="Calculate sha256 for one recovery id")
     info.add_argument("restore_id")
+    group.add_parser("partial-list", help="Read-only list of interrupted transfer artifacts")
+    partial = group.add_parser("partial-info", help="Read-only sha256 and state for one interrupted transfer")
+    partial.add_argument("partial_id")
     purge_parser = group.add_parser("purge", help="Permanently remove one trash ID, never a live filename")
     purge_parser.add_argument("restore_id")
     purge_parser.add_argument("--expect-sha256", required=True)
@@ -192,6 +197,10 @@ def main():
             result = trash_list(store)
         elif args.action == "trash-info":
             result = trash_info(store, args.restore_id)
+        elif args.action == "partial-list":
+            result = partial_list(store)
+        elif args.action == "partial-info":
+            result = partial_info(store, args.partial_id)
         elif args.action == "purge":
             result = purge(store, args.restore_id, args.expect_sha256, confirmed=args.confirm_permanent)
         elif args.action == "restore":
