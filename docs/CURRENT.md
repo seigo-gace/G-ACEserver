@@ -1,3 +1,14 @@
+# 2026-11-06 Codex｜共通Terminal実機受入・F01再起動証拠の実装
+
+- **共通Terminal:** server-core SHA `fda997ca2e008cea74ffed11955c3af9e2158462`、Gserver SHA `2ef0bfe5bd67f74ff6b3ce15d3fece0762a6a9d2`、webhook-gateway SHA `fd7e6eb02cab190d25095aadc8ee854057b0d6a8` を実Runtimeで読戻し。Gserver向け3 RequestがHost実行・Result Sink保存・Control #10 GitHub返却までPASS。既存Contabo `project.git_head` もPASSし、従来経路を維持。Source/CIだけでなく共通ServerTerminalのGserver第2Host接続は実機受入済み。Gserver全体F01〜F08とは別判定。
+- **F01 Source:** `scripts/f01_reboot_acceptance.py` を追加。Windows/WSL boot IDとDocker/containerd、Gserver container、local healthを再起動前後で照合し、両bootの変更とRuntime復帰が揃った場合だけ `WINDOWS_REBOOT_RECOVERY=PASS` とする。比較実行自体がWSLを起動し得るため、Windowsからの完全自動起動は別の `NOT_VERIFIED` を維持。再起動・service操作・Docker変更は行わない。
+- **F01 PC準備:** private evidence `/home/gace/.local/state/gserver/verification/f01-reboot-before.json` をowner `0600`で保存。これは再起動前snapshotの準備PASSであり、実Windows再起動後の比較は未実施。Windows reboot recoveryは引き続き `NOT_VERIFIED`。
+- **検証:** F01重点12件PASS、全Python回帰 **414 tests / 81.058s / OK**。既存dirty 4ファイルと未追跡`FETCH_HEAD`は変更・stash・commit対象にせず保全。Secret、実データ、稼働サービスの停止なし。
+- **rollback:** Sourceは今回commitをrevert。private snapshotは判定入力にすぎず、残してもRuntimeへ影響しない。削除する場合もGserver完成作業とは分離し、既存データやサービスへ触れない。
+- **次Gate:** 利用者が許可する通常のWindows再起動後に同じsnapshotを `compare` し、F01 reboot recoveryだけを受入する。完全自動起動は別証拠を要求。並行してF05の既存Gateway→TGserver P015 raw/index readbackと暗号backup download/隔離restoreを進め、KB/F04は最後まで保留。
+
+---
+
 # 2026-11-05 Codex｜共通Terminal結果相関の不足修正
 
 - Dispatcher SHA・Command SHAを既存Adapterの結果に追加。未知schemaと異なるevent sourceを実行前に拒否し、非UTF-8出力も返却テキストとSHA256が一致するよう修正。
