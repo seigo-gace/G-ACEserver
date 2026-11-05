@@ -63,6 +63,12 @@ class GserverHostReceiverTests(unittest.TestCase):
         with self.assertRaisesRegex(ReceiverError, "GSERVER_EVENT_REQUEST_MISMATCH"):
             handle_event(event, ROOT)
 
+    def test_wrong_source_is_denied_before_execution(self):
+        event = self.event()
+        event["sourceId"] = "other-project"
+        with self.assertRaisesRegex(ReceiverError, "GSERVER_EVENT_SOURCE_MISMATCH"):
+            handle_event(event, ROOT)
+
 
 if __name__ == "__main__":
     unittest.main()

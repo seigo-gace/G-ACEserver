@@ -49,6 +49,8 @@ def validate_request(request, root):
                 "command", "command_sha256", "host_target"}
     if not isinstance(request, dict) or set(request) != required:
         raise HostAdapterError("GSERVER_REQUEST_KEYS_INVALID")
+    if request["schema"] != "gace.servercore-bounded-host.request/v1":
+        raise HostAdapterError("GSERVER_REQUEST_SCHEMA_INVALID")
     if not REQUEST_ID.fullmatch(str(request["id"])):
         raise HostAdapterError("GSERVER_REQUEST_ID_INVALID")
     if request["command_id"] != "host.command" or request["host_target"] != TARGET:
@@ -88,12 +90,17 @@ def execute_request(request, root):
         stdout = (exc.stdout or b"")[:MAX_OUTPUT] if isinstance(exc.stdout, bytes) else b""
         stderr = b"GSERVER_COMMAND_TIMEOUT"
         state, code = "FAIL", 124
+    # Hash the exact UTF-8 text returned on the wire, including replacement of
+    # non-UTF-8 command output. Consumers can independently verify these bytes.
+    stdout_text = stdout.decode("utf-8", errors="replace")
+    stderr_text = stderr.decode("utf-8", errors="replace")
     result = {
         "request_id": request["id"], "host_target": TARGET, "repository": REPOSITORY,
         "repo_sha": request["repo_sha"], "host_sha": host_sha, "state": state,
-        "exit_code": code, "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
-        "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
-        "stdout": stdout.decode("utf-8", errors="replace"),
-        "stderr": stderr.decode("utf-8", errors="replace"),
+        "dispatcher_sha": request["expected_sha"],
+        "command_sha256": request["command_sha256"],
+        "exit_code": code, "stdout_sha256": hashlib.sha256(stdout_text.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(stderr_text.encode()).hexdigest(),
+        "stdout": stdout_text, "stderr": stderr_text,
     }
     return result

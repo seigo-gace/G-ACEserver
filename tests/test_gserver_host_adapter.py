@@ -39,6 +39,20 @@ class GserverHostAdapterTests(unittest.TestCase):
         self.assertEqual(result["host_sha"], self.sha)
         self.assertEqual(result["stdout_sha256"], hashlib.sha256(b"adapter-pass").hexdigest())
         self.assertEqual(result["stderr_sha256"], hashlib.sha256(b"").hexdigest())
+        self.assertEqual(result["dispatcher_sha"], self.request["expected_sha"])
+        self.assertEqual(result["command_sha256"], self.request["command_sha256"])
+
+    def test_unknown_schema_rejected_before_execution(self):
+        with self.assertRaisesRegex(adapter.HostAdapterError, "SCHEMA_INVALID"):
+            adapter.execute_request(dict(self.request, schema="other/v1"), self.root)
+
+    def test_non_utf8_output_hash_matches_returned_text(self):
+        command = "printf '\\377'"
+        value = dict(self.request, command=command,
+                     command_sha256=hashlib.sha256(command.encode()).hexdigest())
+        result = adapter.execute_request(value, self.root)
+        self.assertEqual(result["stdout"], "\ufffd")
+        self.assertEqual(result["stdout_sha256"], hashlib.sha256(result["stdout"].encode()).hexdigest())
 
     def test_wrong_repo_sha_and_changed_command_are_rejected(self):
         with self.assertRaisesRegex(adapter.HostAdapterError, "REPO_SHA_MISMATCH"):

@@ -31,6 +31,8 @@ def handle_event(event, root):
         raise ReceiverError("GSERVER_EVENT_KEYS_INVALID")
     if event["eventType"] != EVENT_TYPE or event["destinationId"] != DESTINATION:
         raise ReceiverError("GSERVER_EVENT_ROUTE_MISMATCH")
+    if event["sourceId"] != "server-core-github":
+        raise ReceiverError("GSERVER_EVENT_SOURCE_MISMATCH")
     if event["subject"] != "servercore-bounded-host/host.command":
         raise ReceiverError("GSERVER_EVENT_SUBJECT_INVALID")
     request = event["data"]

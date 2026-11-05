@@ -1,3 +1,10 @@
+# 2026-11-05 Codex｜共通Terminal結果相関の不足修正
+
+- Dispatcher SHA・Command SHAを既存Adapterの結果に追加。未知schemaと異なるevent sourceを実行前に拒否し、非UTF-8出力も返却テキストとSHA256が一致するよう修正。
+- Gserver重点9件PASS。server-core側で全相関項目・出力改変拒否を検証。Actionsのhost_target引継ぎ漏れも共通側で修正。
+- Gateway正本ではdestination登録はdeployment設定であり、管理APIによる追加は提供されていない。旧報告のAPI登録可能という前提を訂正。実配送・認証済み受信・Result Sink保存・CHAT返却は未受入。
+- rollbackは今回のSource commitを通常revert。既存dirty、稼働中サービス、Secret、Gateway設定は変更なし。
+
 # 2026-11-05 Codex｜server-core共通Terminal Gserver target adapter
 
 - **最小Receiver境界:** `scripts/gserver_host_receiver.py` を追加。既存Gateway側で認証済みの共通イベントenvelopeだけを検査し、destination/event type/subject/event ID/target/repositoryを照合して、既存 `gserver_host_adapter.py` へ1件だけ委譲する。listener、共通Dispatcher、固定コマンド一覧、Secret保存、daemonは追加していない。
