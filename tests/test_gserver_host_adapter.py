@@ -1,4 +1,5 @@
 import hashlib
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -41,6 +42,25 @@ class GserverHostAdapterTests(unittest.TestCase):
         self.assertEqual(result["stderr_sha256"], hashlib.sha256(b"").hexdigest())
         self.assertEqual(result["dispatcher_sha"], self.request["expected_sha"])
         self.assertEqual(result["command_sha256"], self.request["command_sha256"])
+
+    def test_normal_development_write_git_and_home_are_available(self):
+        command = "printf changed > generated.txt; git add generated.txt; printf %s \"$HOME\""
+        value = dict(self.request, command=command,
+                     command_sha256=hashlib.sha256(command.encode()).hexdigest())
+        result = adapter.execute_request(value, self.root)
+        self.assertEqual(result["state"], "PASS")
+        self.assertEqual(result["stdout"], os.path.expanduser("~"))
+        self.assertEqual((self.root / "generated.txt").read_text(), "changed")
+        staged = subprocess.check_output(
+            ["git", "-C", str(self.root), "diff", "--cached", "--name-only"], text=True)
+        self.assertEqual(staged.strip(), "generated.txt")
+
+    def test_timeout_is_configurable_for_long_development_jobs(self):
+        self.assertEqual(adapter.command_timeout({}), 3600)
+        self.assertEqual(adapter.command_timeout({"GSERVER_TERMINAL_COMMAND_TIMEOUT_SECONDS": "7200"}), 7200)
+        for invalid in ("0", "21601", "bad"):
+            with self.assertRaisesRegex(adapter.HostAdapterError, "TIMEOUT_INVALID"):
+                adapter.command_timeout({"GSERVER_TERMINAL_COMMAND_TIMEOUT_SECONDS": invalid})
 
     def test_unknown_schema_rejected_before_execution(self):
         with self.assertRaisesRegex(adapter.HostAdapterError, "SCHEMA_INVALID"):

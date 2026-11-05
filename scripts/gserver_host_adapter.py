@@ -9,6 +9,7 @@ Host/Gateway admission gate.
 """
 import hashlib
 import os
+import pwd
 from pathlib import Path
 import re
 import subprocess
@@ -19,11 +20,39 @@ REQUEST_ID = re.compile(r"^req_[0-9a-f]{24}$")
 REPOSITORY = "seigo-gace/G-ACEserver"
 TARGET = "gserver"
 MAX_OUTPUT = 262144
-TIMEOUT_SECONDS = 15
+DEFAULT_TIMEOUT_SECONDS = 3600
+MAX_TIMEOUT_SECONDS = 21600
 
 
 class HostAdapterError(ValueError):
     pass
+
+
+def command_timeout(env=None):
+    value = (env or os.environ).get("GSERVER_TERMINAL_COMMAND_TIMEOUT_SECONDS",
+                                    str(DEFAULT_TIMEOUT_SECONDS))
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        raise HostAdapterError("GSERVER_TIMEOUT_INVALID") from None
+    if not 1 <= seconds <= MAX_TIMEOUT_SECONDS:
+        raise HostAdapterError("GSERVER_TIMEOUT_INVALID")
+    return seconds
+
+
+def command_environment():
+    """Use the login user's normal development environment and credentials."""
+    env = dict(os.environ)
+    try:
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except (KeyError, OSError):
+        home = env.get("HOME", "/home/gace")
+    env.update({
+        "HOME": home,
+        "PATH": env.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    })
+    return env
 
 
 def _sha(path):
@@ -77,10 +106,9 @@ def execute_request(request, root):
     host_sha = validate_request(request, root)
     try:
         completed = subprocess.run(
-            ["/bin/sh", "-c", request["command"]], cwd=root,
-            capture_output=True, text=False, timeout=TIMEOUT_SECONDS, check=False,
-            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(root),
-                 "GIT_CONFIG_NOSYSTEM": "1"}, close_fds=True,
+            ["/bin/bash", "-lc", request["command"]], cwd=root,
+            capture_output=True, text=False, timeout=command_timeout(), check=False,
+            env=command_environment(), close_fds=True,
         )
         stdout = completed.stdout[:MAX_OUTPUT]
         stderr = completed.stderr[:MAX_OUTPUT]
