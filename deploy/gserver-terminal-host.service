@@ -1,0 +1,30 @@
+[Unit]
+Description=Gserver adapter for the shared server-core ServerTerminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gace/Project/Gserver/repository
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/gace/.config/gserver-terminal-host/env
+ExecStart=/usr/bin/python3 /home/gace/Project/Gserver/repository/scripts/gserver_terminal_host.py --host 127.0.0.1 --port 8790 --server-core /home/gace/server-core --result-endpoint ${GACE_GSERVER_RESULT_ENDPOINT}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gace/.local/state/gserver-terminal
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
