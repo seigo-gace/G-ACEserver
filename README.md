@@ -13,9 +13,9 @@ Implement the Bot local runtime and existing TGserver ZERO connection first; Dev
 ## GitHub Project repository Terminal
 
 The shared Gserver ServerTerminal accepts a `project_context.repository` from GitHub
-Project #1. The existing Host helper checks Project items using the already
-authenticated GitHub CLI, reuses an existing checkout by verified origin, and
-clones a missing repository once under `projects/`. The existing `projects/`
+Project #1. The caller checks the Project item using its existing GitHub access. The
+admitted Gserver Host reuses a checkout by verified origin or clones a missing
+repository once under `projects/` using existing Git access. The existing `projects/`
 Workspace folder makes future repositories visible without per-repository
 Terminal or Workspace configuration. An optional `project_context.sha` pins
 the checkout HEAD. Project membership does not replace Host admission or
