@@ -26,17 +26,12 @@ class ProjectTerminalTests(unittest.TestCase):
             sha = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
             workspace = Path(root) / 'workspace.code-workspace'
             workspace.write_text(json.dumps({'folders': [{'path': str(checkout)}]}))
-            self.assertEqual(terminal.checkout('example/repo', sha, workspace, projects,
-                                               registered={'example/repo'}), checkout)
+            self.assertEqual(terminal.checkout('example/repo', sha, workspace, projects), checkout)
             self.assertEqual(terminal.find_checkout('example/repo', workspace, projects), checkout)
             with self.assertRaisesRegex(ValueError, 'SHA_MISMATCH'):
-                terminal.checkout('example/repo', 'a' * 40, workspace, projects,
-                                  registered={'example/repo'})
-            with self.assertRaisesRegex(ValueError, 'NOT_REGISTERED'):
-                terminal.checkout('example/repo', sha, workspace, projects, registered=set())
+                terminal.checkout('example/repo', 'a' * 40, workspace, projects)
             with self.assertRaisesRegex(ValueError, 'IDENTITY_INVALID'):
-                terminal.checkout('../invalid', sha, workspace, projects,
-                                  registered={'../invalid'})
+                terminal.checkout('../invalid', sha, workspace, projects)
 
     def test_future_checkout_needs_no_workspace_entry(self):
         with tempfile.TemporaryDirectory() as root:
@@ -52,7 +47,7 @@ class ProjectTerminalTests(unittest.TestCase):
             workspace = Path(root) / 'workspace.code-workspace'
             workspace.write_text(json.dumps({'folders': [{'path': str(projects)}]}))
             self.assertEqual(terminal.checkout('owner/future', workspace=workspace,
-                                               projects=projects, registered={'owner/future'}), checkout)
+                                               projects=projects), checkout)
 
     def test_first_use_clones_once_without_replacing_other_project(self):
         with tempfile.TemporaryDirectory() as root:

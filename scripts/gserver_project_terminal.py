@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a Project #1 repository through the existing Gserver Host route."""
+"""Resolve a GitHub repository through the existing admitted Gserver Host route."""
 import argparse
 import fcntl
 import json
@@ -13,7 +13,6 @@ import tempfile
 
 WORKSPACE = Path('/home/gace/Project/Gserver/workspace/G-ACE.code-workspace')
 PROJECTS = Path('/home/gace/Project/Gserver/projects')
-GH_WINDOWS = Path('/mnt/c/Program Files/GitHub CLI/gh.exe')
 REPOSITORY = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 
@@ -23,24 +22,6 @@ def identity(repository, sha):
             any(part in {'.', '..'} for part in repository.split('/')) or
             (sha is not None and (not isinstance(sha, str) or not SHA.fullmatch(sha)))):
         raise ValueError('PROJECT_IDENTITY_INVALID')
-
-
-def registered_repositories(gh=None):
-    """Read the owner GitHub Project through its existing authenticated CLI."""
-    gh = gh or (shutil.which('gh') or str(GH_WINDOWS))
-    try:
-        result = subprocess.run(
-            [str(gh), 'project', 'item-list', '1', '--owner', 'seigo-gace',
-             '--format', 'json', '--limit', '10000', '--jq',
-             '{total:.totalCount,repositories:[.items[].content.repository]|unique}'],
-            capture_output=True, text=True, timeout=60, check=True)
-        data = json.loads(result.stdout)
-        repositories = data['repositories']
-        if not isinstance(repositories, list) or not isinstance(data['total'], int) or data['total'] > 10000:
-            raise ValueError('PROJECT_REGISTRY_INCOMPLETE')
-        return set(value for value in repositories if isinstance(value, str))
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        raise ValueError('PROJECT_REGISTRY_UNAVAILABLE') from None
 
 
 def workspace_paths(workspace, projects):
@@ -120,11 +101,8 @@ def clone_checkout(repository, projects=PROJECTS, *, source_url=None):
             shutil.rmtree(stage)
 
 
-def checkout(repository, sha=None, workspace=WORKSPACE, projects=PROJECTS, *, registered=None):
+def checkout(repository, sha=None, workspace=WORKSPACE, projects=PROJECTS):
     identity(repository, sha)
-    allowed = registered_repositories() if registered is None else registered
-    if repository not in allowed:
-        raise ValueError('PROJECT_NOT_REGISTERED')
     path = find_checkout(repository, workspace, projects)
     if path is None:
         lock = projects / '.gserver-project-terminal.lock'
