@@ -10,6 +10,18 @@ Gserver is a Docker/Compose-first self-hosted service platform on the owner's Wi
 
 Implement the Bot local runtime and existing TGserver ZERO connection first; Dev KB is postponed by the owner. See [Bot-to-TGserver contract](docs/architecture/BOT_TGS_BRIDGE.md), [safe one-shot Bot-ready installation](scripts/gserver_bot_ready.py), and [Current](docs/CURRENT.md). Telegram live delivery is NOT VERIFIED despite TGserver source registry CI PASS.
 
+## GitHub Project repository Terminal
+
+The shared Gserver ServerTerminal accepts a `project_context.repository` from GitHub
+Project #1. The existing Host helper checks Project items using the already
+authenticated GitHub CLI, reuses an existing checkout by verified origin, and
+clones a missing repository once under `projects/`. The existing `projects/`
+Workspace folder makes future repositories visible without per-repository
+Terminal or Workspace configuration. An optional `project_context.sha` pins
+the checkout HEAD. Project membership does not replace Host admission or
+authorize production deployment. See the shared
+[Project integration rules](https://github.com/G-ACE-inc/server-core/blob/main/docs/PROJECT_INTEGRATION_RULES.md).
+
 ## Start here
 
 1. Read [`AGENTS.md`](AGENTS.md) for bounded Codex/AI execution and existing G-ACE rules.
