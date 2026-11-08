@@ -15,6 +15,10 @@ WORKSPACE = Path('/home/gace/Project/Gserver/workspace/G-ACE.code-workspace')
 PROJECTS = Path('/home/gace/Project/Gserver/projects')
 REPOSITORY = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
+SKIP_DIRECTORIES = {'.git', '.next', '.venv', '.codex-preserve', 'node_modules',
+                    'dist', 'build', 'archive', 'backups', 'logs', '旧project'}
+MAX_PROJECT_DEPTH = 8
+MAX_PROJECT_DIRECTORIES = 10000
 
 
 def identity(repository, sha):
@@ -22,6 +26,26 @@ def identity(repository, sha):
             any(part in {'.', '..'} for part in repository.split('/')) or
             (sha is not None and (not isinstance(sha, str) or not SHA.fullmatch(sha)))):
         raise ValueError('PROJECT_IDENTITY_INVALID')
+
+
+def project_checkouts(projects):
+    """Find existing checkouts below the registered projects parent."""
+    pending = [(projects, 0)]
+    visited = 0
+    while pending:
+        parent, depth = pending.pop()
+        visited += 1
+        if visited > MAX_PROJECT_DIRECTORIES:
+            raise ValueError('PROJECT_DISCOVERY_LIMIT')
+        for child in parent.iterdir():
+            if child.name in SKIP_DIRECTORIES or child.name.startswith('.'):
+                continue
+            if child.is_symlink() or not child.is_dir():
+                continue
+            if (child / '.git').exists():
+                yield child
+            elif depth < MAX_PROJECT_DEPTH:
+                pending.append((child, depth + 1))
 
 
 def workspace_paths(workspace, projects):
@@ -35,11 +59,11 @@ def workspace_paths(workspace, projects):
     for item in folders:
         if isinstance(item, dict) and isinstance(item.get('path'), str):
             paths.append(Path(item['path']))
-    # The projects parent is already a Workspace folder. New checkouts below
-    # it need no per-repository Workspace entry.
+    # The projects parent is already a Workspace folder. Existing subprojects
+    # may contain nested repositories; never clone over a missed checkout.
     if projects.is_symlink() or not projects.is_dir():
         raise ValueError('PROJECTS_ROOT_UNAVAILABLE')
-    paths.extend(path for path in projects.iterdir() if path.is_dir())
+    paths.extend(project_checkouts(projects))
     return paths
 
 
