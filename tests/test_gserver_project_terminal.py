@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE = Path(__file__).resolve().parents[1] / 'scripts/gserver_project_terminal.py'
 spec = importlib.util.spec_from_file_location('gserver_project_terminal', MODULE)
@@ -70,6 +71,39 @@ class ProjectTerminalTests(unittest.TestCase):
             self.assertEqual((original / 'data').read_text(), 'preserve')
             with self.assertRaisesRegex(ValueError, 'DESTINATION_CONFLICT'):
                 terminal.clone_checkout('owner/future', projects, source_url=str(source))
+
+    def test_nested_existing_checkout_is_reused_without_clone(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            projects = root / 'projects'
+            nested = projects / 'TGtumbler' / 'GateApp-Bot'
+            nested.mkdir(parents=True)
+            subprocess.run(['git', 'init', '-q', str(nested)], check=True)
+            subprocess.run(['git', '-C', str(nested), 'config', 'user.email', 'test@example.com'], check=True)
+            subprocess.run(['git', '-C', str(nested), 'config', 'user.name', 'Test'], check=True)
+            subprocess.run(['git', '-C', str(nested), 'commit', '--allow-empty', '-qm', 'initial'], check=True)
+            subprocess.run(['git', '-C', str(nested), 'remote', 'add', 'origin',
+                            'https://github.com/seigo-gace/GateApp-Bot.git'], check=True)
+            workspace = root / 'workspace.code-workspace'
+            workspace.write_text(json.dumps({'folders': [{'path': str(projects)}]}))
+            with mock.patch.object(terminal, 'clone_checkout', side_effect=AssertionError('unexpected clone')):
+                self.assertEqual(terminal.checkout('seigo-gace/GateApp-Bot',
+                                                   workspace=workspace, projects=projects), nested)
+            legacy = projects / '旧project' / 'legacy-copy'
+            legacy.mkdir(parents=True)
+            subprocess.run(['git', 'init', '-q', str(legacy)], check=True)
+            subprocess.run(['git', '-C', str(legacy), 'remote', 'add', 'origin',
+                            'git@github.com:seigo-gace/GateApp-Bot.git'], check=True)
+            self.assertEqual(terminal.checkout('seigo-gace/GateApp-Bot',
+                                               workspace=workspace, projects=projects), nested)
+            duplicate = projects / 'duplicate'
+            duplicate.mkdir()
+            subprocess.run(['git', 'init', '-q', str(duplicate)], check=True)
+            subprocess.run(['git', '-C', str(duplicate), 'remote', 'add', 'origin',
+                            'https://github.com/seigo-gace/GateApp-Bot.git'], check=True)
+            with self.assertRaisesRegex(ValueError, 'NOT_UNIQUE'):
+                terminal.checkout('seigo-gace/GateApp-Bot', workspace=workspace,
+                                  projects=projects)
 
 
 if __name__ == '__main__':
