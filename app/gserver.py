@@ -17,7 +17,9 @@ from logging.handlers import RotatingFileHandler
 from urllib.parse import parse_qs, quote, urlsplit
 from storage import Storage, StorageUnavailable, InvalidPath, byte_range
 from kb_source import inspect as inspect_existing_kb, KBSourceError
-from tgs_bridge import BotSpool, BotEventError, flush_once, gateway_token, MAX_BODY
+from tgs_bridge import (BotSpool, BotEventError, flush_once, gateway_token,
+                        gateway_access_headers, gateway_configuration_lock,
+                        GATEWAY_CONFIG_INCOMPLETE, MAX_BODY)
 
 HOST = os.environ.get("GSERVER_BIND", "127.0.0.1")
 PORT = int(os.environ.get("GSERVER_PORT", "8765"))
@@ -350,16 +352,23 @@ def bot_gateway_worker(stop_signal):
     # Without an explicit gateway URL/token file, events stay in local SQLite.
     while not stop_signal.is_set():
         try:
-            if (BOT_SPOOL_DIR and os.path.isfile(BOT_GATEWAY_URL_FILE)
-                    and os.path.isfile(BOT_GATEWAY_TOKEN_FILE)):
-                url_file = Path(BOT_GATEWAY_URL_FILE)
-                if url_file.is_symlink() or url_file.stat().st_size > 300:
-                    raise BotEventError("GATEWAY_URL_FILE_UNSAFE")
-                url = url_file.read_text(encoding="ascii").strip()
-                token = gateway_token(BOT_GATEWAY_TOKEN_FILE)
-                result = flush_once(BotSpool(BOT_SPOOL_DIR), url, token, limit=10)
-                if result["blocked"]:
-                    logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
+            if BOT_SPOOL_DIR:
+                # Hold a shared lock through delivery: a concurrent Owner config
+                # update cannot mix old URL with new Access/Bearer credentials.
+                with gateway_configuration_lock():
+                    if os.path.lexists(GATEWAY_CONFIG_INCOMPLETE):
+                        raise BotEventError("GATEWAY_CONFIG_INCOMPLETE")
+                    if (os.path.isfile(BOT_GATEWAY_URL_FILE)
+                            and os.path.isfile(BOT_GATEWAY_TOKEN_FILE)):
+                        url_file = Path(BOT_GATEWAY_URL_FILE)
+                        if url_file.is_symlink() or url_file.stat().st_size > 300:
+                            raise BotEventError("GATEWAY_URL_FILE_UNSAFE")
+                        url = url_file.read_text(encoding="ascii").strip()
+                        token = gateway_token(BOT_GATEWAY_TOKEN_FILE)
+                        gateway_access_headers()  # fail closed before claiming any queued event
+                        result = flush_once(BotSpool(BOT_SPOOL_DIR), url, token, limit=10)
+                        if result["blocked"]:
+                            logger.warning("bot_gateway_blocked_count=%d", result["blocked"])
         except (BotEventError, sqlite3.Error, OSError, ValueError):
             logger.warning("bot_gateway_retryable_or_config_error")
         stop_signal.wait(20)

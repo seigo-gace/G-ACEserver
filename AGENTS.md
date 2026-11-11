@@ -1,11 +1,15 @@
+> **2026-10-31 Master追加委任:** Gserverにもserver-core司令室のWorkspaceと既存ServerTerminal/Agent Loop接続を用意する。[採用構成・優先順位](docs/architecture/WORKSPACE_SERVERCORE.md)。同一upstreamのlocal checkoutと既存Current/Ruleを再利用し、別指令室/新規常駐AIを作らない。Contabo統合の調査は今回対象だが、共有稼働/他Projectの変更許可と混同しない。SERVER_AI #16維持、既存Control #10のGserver CUを引き継ぐ。
+
 # G-ACEserver｜Codex 実行入口
-> **2026-10-27 Master明示委任｜Gserver開発継続:** [Codex実行引継ぎ](docs/CODEX_HANDOFF_2026-10-27.md) をまず参照し、現在の実機状態・再開点・最終F01～F08・保護境界を確認する。1回の対話セッションでGserver実装と検証を継続する許可であり、定期実行/別AI起動/本番Host変更の許可ではない。古いCurrent記録より新しい実測を優先する。
+> **2026-10-31 最新:** D側WSL ext4の既存作業領域を編集元とする（G側旧copyは保持、二重編集禁止）。[通信保護引継ぎv3](docs/handoffs/TELEGRAM_VPN_PRIVACY_2026-10-30.md#9-codex再レビュー採用修正-v32026-10-31実装に先行)を適用。対象appとcloudflared双方のVPN経由・IP秘匿・既存防御維持・速度/復旧は必須受入。ローカルCore確認と外部通信保護完成は別判定。Contabo不使用、他app/共有提供元の変更なし。
+> **2026-10-30 最新目的:** 下記「Master最新優先」と `docs/CURRENT.md` 冒頭を優先。汎用アプリ運用を完成させる。旧引継ぎのBot/TGS先行・古い実機状態は現行指示ではない。
+> **2026-10-27 Master明示委任｜Gserver開発継続:** [Codex実行引継ぎ](docs/CODEX_HANDOFF_2026-10-27.md) は実機履歴・最終F01～F08・保護境界の参考。現在の再開点は10/30 Currentを確認する。1回の対話セッションでGserver実装と検証を継続する許可であり、定期実行/別AI起動/本番Host変更の許可ではない。古いCurrent記録より新しい実測を優先する。
 
 > **2026-10-28 Master最新変更:** 本人だけがVS Code/CursorからWSLを管理。**管理用Web UIの追加開発/受入は不要**（Web/APIは必要な機能のみ）。D:\WSL\UbuntuへWSL本体は既存移設済み。C:容量保護とD: HDDの速度劣化に注意し、Docker Engine 29の`/var/lib/docker`/`/var/lib/containerd`とC/D実使用をread-only確認、不要な二重依存・image/cache増殖を抑制。前の「管理UI必須」指示より今回のMaster意思を優先。詳細は[完成条件](docs/requirements/FINAL_ACCEPTANCE.md)。
 
-## Master最新優先（2026-10-28）
+## Master最新優先（2026-10-30）
 
-KB作業を保留し、GserverのTelegram Bot用ローカル受付・Gserver Docker実機稼働・既存Webhook Gateway→TGserver ZERO連携の実E2Eを優先する。docs/architecture/BOT_TGS_BRIDGE.md参照。Gserver専用P015はTGserver source registry上CI PASSだが本番Topic・配送は別確認。妻PC/SMB/管理UIの作業を持ち込まない。勝手な有料AI/定期タスクは禁止。
+[Issue #9 引継ぎ訂正](https://github.com/seigo-gace/G-ACEserver/issues/9#issuecomment-6513092077)を適用。Gserverは独立アプリを運用する汎用Docker/Composeサーバー。既存Core/認証/G: Storageの実機PASSを維持し、PR #15の汎用アプリ管理・共存・復旧を優先する。Telegram Bot/Tumblrは別アプリ、TGserverはログ/バックアップの別責務。通常起動をGateway/TGS/Cloudflare/VPNの完成でブロックしない。既存Bot spoolと既存成果を維持し、原本・本番設定を変更しない。10/27引継ぎと10/28 Bot/TGS先行は履歴として読む。管理Web UIは不要、F01〜F08の最終要件は維持。
 
 ## 読込順
 1. [README.md](README.md) → [docs/CURRENT.md](docs/CURRENT.md) → 今回の GitHub Issue／[46タスク](docs/tasks/S0.md)

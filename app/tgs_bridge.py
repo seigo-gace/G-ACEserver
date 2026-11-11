@@ -5,6 +5,7 @@ At-least-once HTTP delivery uses stable sourceId/eventId and Gateway 202 receipt
 """
 import hashlib
 import contextlib
+import fcntl
 import hmac
 import json
 import os
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 
 PROJECT_ID = "P015"  # must be provisioned on the real TGserver before remote use
 DESTINATION = "tgserver-zero-bulk"
+# Explicit UA used consistently across Cloudflare Access preflight and live POST.
+GATEWAY_USER_AGENT = "Mozilla/5.0 (compatible; GACE-Gserver/1.0)"
 BOT = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 EVENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 KIND = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
@@ -28,6 +31,10 @@ MAX_PENDING = 5000
 MAX_SENT_RECEIPTS = 20000
 MAX_ATTEMPTS = 20
 MAX_BODY = 4096
+ACCESS_CLIENT_ID_FILE = "/var/lib/gserver/gateway-access-client-id"
+ACCESS_CLIENT_SECRET_FILE = "/var/lib/gserver/gateway-access-client-secret"
+GATEWAY_CONFIG_DIR = "/var/lib/gserver"
+GATEWAY_CONFIG_INCOMPLETE = "/var/lib/gserver/gateway-config-incomplete"
 ALLOWED = {"bot.started", "bot.stopped", "bot.error", "bot.recovered",
            "bot.request.completed", "bot.request.failed", "bot.update.received",
            "bot.delivery.completed", "bot.delivery.failed"}
@@ -85,8 +92,18 @@ def secure_dir(path):
         raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
     if not path.exists():
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if path.is_symlink():
-        raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
+    # An existing spool directory must never expose operational events or
+    # its SQLite WAL through other users' directory traversal permissions.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        raise BotEventError("SPOOL_DIRECTORY_UNSAFE") from None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise BotEventError("SPOOL_DIRECTORY_UNSAFE")
+    finally:
+        os.close(fd)
     return path
 
 
@@ -113,7 +130,12 @@ class BotSpool:
                 id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 next_attempt INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
-                sent_at INTEGER, last_status TEXT NOT NULL DEFAULT 'queued')""")
+                sent_at INTEGER, last_status TEXT NOT NULL DEFAULT 'queued',
+                lease_generation INTEGER NOT NULL DEFAULT 0)""")
+            # Upgrade an existing persistent spool in-place without dropping rows.
+            columns = {col[1] for col in conn.execute("PRAGMA table_info(events)").fetchall()}
+            if "lease_generation" not in columns:
+                conn.execute("ALTER TABLE events ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0")
             conn.execute("CREATE INDEX IF NOT EXISTS events_ready ON events(state,next_attempt)")
         try:
             os.chmod(self.database, 0o600)
@@ -165,27 +187,41 @@ class BotSpool:
         now = int(time.time() if now is None else now)
         with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
+            # If a worker crashed on its final permitted send, the expired
+            # lease must become operator-visible. Never silently strand it
+            # in 'sending' or exceed the bounded retry budget.
+            conn.execute(
+                "UPDATE events SET state='blocked',next_attempt=0,last_status='requires_operator' "
+                "WHERE state='sending' AND next_attempt<=? AND attempts>=?",
+                (now, MAX_ATTEMPTS))
             row = conn.execute(
-                "SELECT id,payload,attempts FROM events WHERE state IN ('pending','sending') "
+                "SELECT id,payload,attempts,lease_generation FROM events WHERE state IN ('pending','sending') "
                 "AND next_attempt<=? AND attempts<? ORDER BY created_at,id LIMIT 1",
                 (now, MAX_ATTEMPTS)).fetchone()
             if not row:
                 return None
-            conn.execute("UPDATE events SET state='sending',next_attempt=?,attempts=attempts+1 WHERE id=?",
+            conn.execute("UPDATE events SET state='sending',next_attempt=?,attempts=attempts+1,"
+                         "lease_generation=lease_generation+1 WHERE id=?",
                          (now + 60, row[0]))
-            return row[0], json.loads(row[1]), row[2] + 1
+            return row[0], json.loads(row[1]), row[2] + 1, row[3] + 1
 
-    def finish(self, key, status, attempts, now=None):
+    def finish(self, key, status, attempts, lease_generation, now=None):
         now = int(time.time() if now is None else now)
         if status not in ("ack", "retry", "blocked"):
             raise BotEventError("BAD_DELIVERY_STATUS")
+        if type(lease_generation) is not int or lease_generation < 1:
+            raise BotEventError("BAD_LEASE_GENERATION")
         state = "sent" if status == "ack" else ("blocked" if status == "blocked" or attempts >= MAX_ATTEMPTS else "pending")
         delay = min(3600, 15 * 2 ** min(attempts, 8))
         with contextlib.closing(self.connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? WHERE id=? AND state='sending'",
-                         (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
-                          status if state != "blocked" else "requires_operator", key))
+            # Only the current lease generation may finish an event. A late
+            # ACK from a previous attempt must not overwrite its successor.
+            changed = conn.execute("UPDATE events SET state=?,next_attempt=?,sent_at=?,last_status=? "
+                                   "WHERE id=? AND state='sending' AND attempts=? AND lease_generation=?",
+                                   (state, now + delay if state == "pending" else 0, now if state == "sent" else None,
+                                    status if state != "blocked" else "requires_operator", key, attempts,
+                                    lease_generation)).rowcount
             # Retain successful receipts for 7 days to deduplicate replays.
             conn.execute("DELETE FROM events WHERE state='sent' AND sent_at<?", (now - 7 * 86400,))
             # A bounded retention window is necessary on a small owner PC.
@@ -193,6 +229,7 @@ class BotSpool:
                 SELECT id FROM events WHERE state='sent'
                 ORDER BY sent_at DESC,id DESC LIMIT -1 OFFSET ?
             )""", (MAX_SENT_RECEIPTS,))
+            return changed == 1
 
 
 def gateway_endpoint(url):
@@ -207,20 +244,95 @@ def gateway_endpoint(url):
 
 
 def gateway_token(path):
-    file = Path(path)
-    if not file.is_file() or file.is_symlink() or file.stat().st_size > 4096:
-        raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE")
-    token = file.read_bytes().strip()
+    # The Gateway bearer is an owner-only secret. Validate the opened inode,
+    # not a pathname which could be replaced between is_file() and read().
+    try:
+        fd = os.open(Path(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE") from None
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.geteuid() or info.st_mode & 0o077
+                or not 24 <= info.st_size <= 4096):
+            raise BotEventError("GATEWAY_TOKEN_FILE_MISSING_OR_UNSAFE")
+        token = os.read(fd, 4097).strip()
+    finally:
+        os.close(fd)
     if not 24 <= len(token) <= 4096 or any(ch <= 32 or ch >= 127 for ch in token):
         raise BotEventError("GATEWAY_TOKEN_INVALID")
     return token.decode("ascii")
 
 
-def send_gateway(payload, endpoint, token, opener=None):
+@contextlib.contextmanager
+def gateway_configuration_lock(directory=GATEWAY_CONFIG_DIR, *, shared=True):
+    """Coordinate the Bot worker and Owner multi-file Gateway configuration."""
+    folder = Path(directory)
+    if not folder.is_dir() or folder.is_symlink():
+        raise BotEventError("GATEWAY_CONFIG_DIRECTORY_UNSAFE")
+    fd = os.open(str(folder / "gateway-config.lock"),
+                 os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise BotEventError("GATEWAY_CONFIG_LOCK_UNSAFE")
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def gateway_access_headers(id_file=None, secret_file=None):
+    """Optional Cloudflare Access service credentials, distinct from Gateway Bearer.
+
+    Missing both means a non-Access private HTTPS route. Partial, malformed or
+    symlinked files fail closed, including before the spool worker claims rows.
+    """
+    id_path = Path(id_file or ACCESS_CLIENT_ID_FILE)
+    secret_path = Path(secret_file or ACCESS_CLIENT_SECRET_FILE)
+    if not id_path.exists() and not secret_path.exists():
+        if id_path.is_symlink() or secret_path.is_symlink():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        return {}
+    values = []
+    for file, limit in ((id_path, 255), (secret_path, 4096)):
+        if file.is_symlink() or not file.is_file():
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        st = file.stat()
+        if st.st_size > limit or st.st_mode & 0o077:
+            raise BotEventError("GATEWAY_ACCESS_FILE_UNSAFE")
+        content = file.read_bytes()
+        if any(ch < 33 or ch > 126 for ch in content):
+            raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INVALID")
+        values.append(content)
+    client_id, client_secret = values
+    if not client_id and not client_secret:
+        return {}
+    if len(client_id) < 8 or len(client_secret) < 8:
+        raise BotEventError("GATEWAY_ACCESS_CREDENTIAL_INCOMPLETE")
+    return {
+        "CF-Access-Client-Id": client_id.decode("ascii"),
+        "CF-Access-Client-Secret": client_secret.decode("ascii"),
+    }
+
+
+class _NoGatewayRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an internal API bearer credential across redirects."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def send_gateway(payload, endpoint, token, opener=None, *, access_headers_override=None):
+    headers = {"Content-Type": "application/json", "User-Agent": GATEWAY_USER_AGENT,
+               "Authorization": "Bearer " + token}
+    headers.update(gateway_access_headers() if access_headers_override is None else access_headers_override)
     request = urllib.request.Request(
         gateway_endpoint(endpoint), data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        method="POST", headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
-    client = opener if opener is not None else urllib.request.build_opener()
+        method="POST", headers=headers)
+    client = opener if opener is not None else urllib.request.build_opener(_NoGatewayRedirect())
     try:
         with client.open(request, timeout=5) as response:
             code = response.status
@@ -234,7 +346,9 @@ def send_gateway(payload, endpoint, token, opener=None):
             return "retry"
         return "ack"
     except urllib.error.HTTPError as error:
-        if error.code in (400, 401, 403, 409, 413, 422):
+        # A redirect means the private internal endpoint is misconfigured.
+        # Require operator repair; never allow an automatic bearer replay.
+        if 300 <= error.code < 400 or error.code in (400, 401, 403, 409, 413, 422):
             return "blocked"
         return "retry"
     except (OSError, ValueError, TimeoutError):
@@ -249,7 +363,7 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
         claimed = spool.claim()
         if claimed is None:
             break
-        key, payload, attempts = claimed
+        key, payload, attempts, generation = claimed
         try:
             result = sender(payload, url, token)
         except Exception:
@@ -258,6 +372,8 @@ def flush_once(spool, url, token, *, limit=10, sender=send_gateway):
         # Do not validate delivery outcomes against the metric dictionary.
         if result not in ("ack", "retry", "blocked"):
             result = "retry"
-        spool.finish(key, result, attempts)
-        done["sent" if result == "ack" else result] += 1
+        # A timed-out worker can finish after another worker has reclaimed
+        # this event. Never report a stale ACK as a durable spool transition.
+        if spool.finish(key, result, attempts, generation):
+            done["sent" if result == "ack" else result] += 1
     return done
