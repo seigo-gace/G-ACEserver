@@ -20,7 +20,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from gserver_host_adapter import execute_request
+from gserver_host_adapter import execute_request, validate_request
 
 
 RECEIVER_PATH = "/internal/gserver-bounded-host"
@@ -161,7 +161,7 @@ def make_handler(*, contract, request_key, result_key, result_endpoint, root,
                 result = receive_delivery(
                     headers, body, contract=contract, delivery_key=request_key,
                     root=root, result_dir=result_dir, lock_path=lock_path,
-                    execute=execute, report=report,
+                    execute=execute, preflight=validate_request, report=report,
                     now=now_fn() if now_fn else None,
                 )
                 self.send_json(200, {"ok": True, "request_id": result["request_id"],
