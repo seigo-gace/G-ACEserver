@@ -27,10 +27,10 @@ class ProjectTerminalTests(unittest.TestCase):
             sha = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
             workspace = Path(root) / 'workspace.code-workspace'
             workspace.write_text(json.dumps({'folders': [{'path': str(checkout)}]}))
-            self.assertEqual(terminal.checkout('example/repo', sha, workspace, projects), checkout)
+            self.assertEqual(terminal.checkout('example/repo', sha, workspace, projects, admit=lambda _repository: True), checkout)
             self.assertEqual(terminal.find_checkout('example/repo', workspace, projects), checkout)
             with self.assertRaisesRegex(ValueError, 'SHA_MISMATCH'):
-                terminal.checkout('example/repo', 'a' * 40, workspace, projects)
+                terminal.checkout('example/repo', 'a' * 40, workspace, projects, admit=lambda _repository: True)
             with self.assertRaisesRegex(ValueError, 'IDENTITY_INVALID'):
                 terminal.checkout('../invalid', sha, workspace, projects)
 
@@ -48,7 +48,7 @@ class ProjectTerminalTests(unittest.TestCase):
             workspace = Path(root) / 'workspace.code-workspace'
             workspace.write_text(json.dumps({'folders': [{'path': str(projects)}]}))
             self.assertEqual(terminal.checkout('owner/future', workspace=workspace,
-                                               projects=projects), checkout)
+                                               projects=projects, admit=lambda _repository: True), checkout)
 
     def test_first_use_clones_once_without_replacing_other_project(self):
         with tempfile.TemporaryDirectory() as root:
@@ -88,14 +88,16 @@ class ProjectTerminalTests(unittest.TestCase):
             workspace.write_text(json.dumps({'folders': [{'path': str(projects)}]}))
             with mock.patch.object(terminal, 'clone_checkout', side_effect=AssertionError('unexpected clone')):
                 self.assertEqual(terminal.checkout('seigo-gace/GateApp-Bot',
-                                                   workspace=workspace, projects=projects), nested)
+                                                   workspace=workspace, projects=projects,
+                                                   admit=lambda _repository: True), nested)
             legacy = projects / '旧project' / 'legacy-copy'
             legacy.mkdir(parents=True)
             subprocess.run(['git', 'init', '-q', str(legacy)], check=True)
             subprocess.run(['git', '-C', str(legacy), 'remote', 'add', 'origin',
                             'git@github.com:seigo-gace/GateApp-Bot.git'], check=True)
             self.assertEqual(terminal.checkout('seigo-gace/GateApp-Bot',
-                                               workspace=workspace, projects=projects), nested)
+                                               workspace=workspace, projects=projects,
+                                               admit=lambda _repository: True), nested)
             duplicate = projects / 'duplicate'
             duplicate.mkdir()
             subprocess.run(['git', 'init', '-q', str(duplicate)], check=True)
@@ -103,7 +105,26 @@ class ProjectTerminalTests(unittest.TestCase):
                             'https://github.com/seigo-gace/GateApp-Bot.git'], check=True)
             with self.assertRaisesRegex(ValueError, 'NOT_UNIQUE'):
                 terminal.checkout('seigo-gace/GateApp-Bot', workspace=workspace,
-                                  projects=projects)
+                                  projects=projects, admit=lambda _repository: True)
+
+    def test_unregistered_repository_is_not_cloned(self):
+        with tempfile.TemporaryDirectory() as root:
+            projects = Path(root) / 'projects'
+            projects.mkdir()
+            keep = projects / 'keep'
+            keep.mkdir()
+            (keep / 'data').write_text('preserve')
+            workspace = Path(root) / 'workspace.code-workspace'
+            workspace.write_text(json.dumps({'folders': [{'path': str(projects)}]}))
+            before = sorted(path.name for path in projects.iterdir())
+            with mock.patch.object(terminal, 'clone_checkout', side_effect=AssertionError('unexpected clone')):
+                with self.assertRaisesRegex(ValueError, 'PROJECT_NOT_REGISTERED'):
+                    terminal.checkout('owner/future', workspace=workspace, projects=projects,
+                                      admit=lambda _repository: False)
+            self.assertEqual(sorted(path.name for path in projects.iterdir()), before)
+            self.assertEqual((keep / 'data').read_text(), 'preserve')
+
+
 
 
 if __name__ == '__main__':
