@@ -1,3 +1,10 @@
+# 2026-11-12 Composer｜直接実行互換ビルダーは既定で無効
+
+- **Source:** `scripts/gserver_terminal_compat.py`。`GSERVER_TERMINAL_DIRECT_EXECUTE=1` のときだけ現行 host.command を組み立て、未設定では拒否する。常駐Hostはこのモジュールをimportしない。
+- **契約:** dispatcher SHA と G-ACEserver実HEADは必須のまま。Project読み取りのSHAは省略できる。書込みと不一致PINは実行前に拒否する。Gateway、HMAC、Result Sink、providerは変更しない。
+- **稼働:** Host採用HEADは `422bca2963b80ac2d051263fa4c35d35d25b0965`。この追加は稼働checkoutを切り替えていない。Request `req_a362fb62710a1fe051a78944` は再実行していない。
+- **承認待ち:** Draft #359 は未採用。ChatGPTから既存Gatewayへ直接POSTする接続はなく、Issue #360 のその欠落は BLOCKED。
+- **rollback:** 追加ファイルをrevertする。Flagは既定OFFなので、戻す前も本番経路は同じ。
 # 2026-11-12 Composer｜共通ServerTerminalの登録checkout
 
 - **Source:** 実装 `422bca2963b80ac2d051263fa4c35d35d25b0965`。PR #31 は feature `chat/gserver-generic-app-runtime-20261030` へ merge `a33c5b989b95985c16d0cbf44b5e2b89390eff35`。このHEADが実機の稼働checkout。main `6e8ec9e3531980f7d41d715b0824ead6bd4b04db` とは別で、mainへは未統合。
