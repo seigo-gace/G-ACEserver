@@ -97,6 +97,30 @@ def head(path):
         raise ValueError('PROJECT_HEAD_UNAVAILABLE') from None
 
 
+
+def github_project_registered(repository):
+    """True when GitHub Project #1 already has an Issue or PR for this repository."""
+    try:
+        result = subprocess.run(
+            ["gh", "api", "-X", "GET", "search/issues",
+             "-f", "q=repo:" + repository + " project:seigo-gace/1"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError("PROJECT_REGISTRATION_UNVERIFIED") from None
+    if result.returncode:
+        if "Validation Failed" in result.stderr or "HTTP 422" in result.stderr:
+            return False
+        raise ValueError("PROJECT_REGISTRATION_UNVERIFIED")
+    try:
+        total = json.loads(result.stdout).get("total_count")
+    except (ValueError, AttributeError):
+        raise ValueError("PROJECT_REGISTRATION_UNVERIFIED") from None
+    if type(total) is not int or total < 0:
+        raise ValueError("PROJECT_REGISTRATION_UNVERIFIED")
+    return total > 0
+
+
 def clone_checkout(repository, projects=PROJECTS, *, source_url=None):
     """Create one owner-private direct child; never replace an existing path."""
     if projects.is_symlink() or not projects.is_dir() or projects.resolve(strict=True) != projects:
@@ -125,8 +149,11 @@ def clone_checkout(repository, projects=PROJECTS, *, source_url=None):
             shutil.rmtree(stage)
 
 
-def checkout(repository, sha=None, workspace=WORKSPACE, projects=PROJECTS):
+def checkout(repository, sha=None, workspace=WORKSPACE, projects=PROJECTS, admit=None):
+    """Reuse a checkout. Clone a Project #1 repository only when it is absent."""
     identity(repository, sha)
+    if not (github_project_registered if admit is None else admit)(repository):
+        raise ValueError('PROJECT_NOT_REGISTERED')
     path = find_checkout(repository, workspace, projects)
     if path is None:
         lock = projects / '.gserver-project-terminal.lock'

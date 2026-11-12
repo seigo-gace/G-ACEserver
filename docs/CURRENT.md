@@ -1,3 +1,10 @@
+# 2026-11-12 Composer｜共通ServerTerminalの登録checkout
+
+- **Source:** 実装 `422bca2963b80ac2d051263fa4c35d35d25b0965`。PR #31 は feature `chat/gserver-generic-app-runtime-20261030` へ merge `a33c5b989b95985c16d0cbf44b5e2b89390eff35`。このHEADが実機の稼働checkout。main `6e8ec9e3531980f7d41d715b0824ead6bd4b04db` とは別で、mainへは未統合。
+- **実機:** Request `req_a362fb62710a1fe051a78944` は [Actions 43233182477](https://github.com/G-ACE-inc/server-core/actions/runs/43233182477) で PASS/exit 0。結果は [Issue #351 comment](https://github.com/G-ACE-inc/server-core/issues/351#issuecomment-6825733888)。GateApp-Bot をSHAなしで読んだ。台帳は COMPLETED が1件で、同じRequestは再実行していない。
+- **受入:** 既存checkoutの再利用、Project #1登録済みで未配置の初回取得、SHAなし読取、明示SHA不一致の実行前拒否、未登録Repoの拒否。
+- **対象外:** Draft PR #15 は open のまま main と CONFLICTING。PR #15全体はmainへマージしない。設計ゲート、Cloudflare入口、project inventory、workspace/apps の未コミット差分は別作業。server-core Draft #359 はGPT CHAT担当。
+- **rollback:** `422bca2` をrevertする。取得済み `projects/seigo-gace--TGserver` は通常のcheckoutなので残す。Hostプロセスは再起動しない。
 # CURRENT｜G-ACEserver
 ## 2026-10-28 Master優先変更：KB停止、GserverをTG Bot受け皿+既存TGserver ZEROへ最速実装
 
