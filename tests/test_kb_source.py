@@ -202,6 +202,18 @@ class KBSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(KBSourceError, "VERIFIER_TIMEOUT"):
                 verify_existing_projection(self.root, authority)
 
+    def test_projection_rejects_source_content_change_during_verifier(self):
+        self.active()
+        self._write("repo", "scripts", "verify_modulecatalog_runtime_projection.py", value=b"# mock")
+        authority = inspect(self.root, verify_hashes=True)
+        def mutate_then_pass(*args, **kwargs):
+            path = self.root.joinpath(*CURRENT, "knowledge-records.jsonl")
+            path.write_bytes(path.read_bytes() + b"tampered")
+            return SimpleNamespace(returncode=0, stdout="GACE_MODULECATALOG_RUNTIME_PROJECTION=PASS", stderr="")
+        with patch("kb_source.subprocess.run", side_effect=mutate_then_pass):
+            with self.assertRaisesRegex(KBSourceError, "HASH_MISMATCH"):
+                verify_existing_projection(self.root, authority)
+
     def test_unactivated_current_cannot_trigger_projection(self):
         result = inspect(self.root)
         with self.assertRaisesRegex(KBSourceError, "REQUIRES_HASHED_ACTIVE"):
