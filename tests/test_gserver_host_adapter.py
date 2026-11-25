@@ -74,9 +74,11 @@ class GserverHostAdapterTests(unittest.TestCase):
         self.assertEqual(result["stdout"], "\ufffd")
         self.assertEqual(result["stdout_sha256"], hashlib.sha256(result["stdout"].encode()).hexdigest())
 
-    def test_wrong_repo_sha_and_changed_command_are_rejected(self):
-        with self.assertRaisesRegex(adapter.HostAdapterError, "REPO_SHA_MISMATCH"):
-            adapter.execute_request(dict(self.request, repo_sha="c" * 40), self.root)
+    def test_stale_repo_sha_does_not_block_free_command_but_changed_command_is_rejected(self):
+        stale = adapter.execute_request(dict(self.request, repo_sha="c" * 40), self.root)
+        self.assertEqual(stale["state"], "PASS")
+        self.assertEqual(stale["host_sha"], self.sha)
+        self.assertEqual(stale["repo_sha"], self.sha)
         with self.assertRaisesRegex(adapter.HostAdapterError, "TRANSPORT_CHANGED"):
             adapter.execute_request(dict(self.request, command="printf changed"), self.root)
 

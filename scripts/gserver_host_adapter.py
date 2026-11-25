@@ -94,16 +94,17 @@ def validate_request(request, root):
     if not COMMAND_DIGEST.fullmatch(str(digest)) \
             or hashlib.sha256(command.encode("utf-8")).hexdigest() != digest:
         raise HostAdapterError("GSERVER_COMMAND_TRANSPORT_CHANGED")
-    host_sha = _sha(root)
-    if host_sha != request["repo_sha"]:
-        raise HostAdapterError("GSERVER_REPO_SHA_MISMATCH")
-    return host_sha
+    # The two SHA fields remain transport correlation metadata for the
+    # existing Actions/Gateway wire format. They do not authorize or deny a
+    # free-form command. Authentication, fixed destination/root and command
+    # integrity are the Terminal boundary.
+    return None
 
 
 def execute_request(request, root):
     """Run one already-admitted common command and return bounded evidence."""
     root = Path(root).resolve(strict=True)
-    host_sha = validate_request(request, root)
+    validate_request(request, root)
     try:
         completed = subprocess.run(
             ["/bin/bash", "-lc", request["command"]], cwd=root,
@@ -122,9 +123,14 @@ def execute_request(request, root):
     # non-UTF-8 command output. Consumers can independently verify these bytes.
     stdout_text = stdout.decode("utf-8", errors="replace")
     stderr_text = stderr.decode("utf-8", errors="replace")
+    # Read the actual Terminal checkout revision for result evidence only.
+    # A stale sender pin must not stop the command before Bash runs.
+    host_sha = _sha(root)
     result = {
         "request_id": request["id"], "host_target": TARGET, "repository": REPOSITORY,
-        "repo_sha": request["repo_sha"], "host_sha": host_sha, "state": state,
+        # Result evidence describes the checkout that actually ran. The stale
+        # request-side SHA is intentionally not promoted to an execution fact.
+        "repo_sha": host_sha, "host_sha": host_sha, "state": state,
         "dispatcher_sha": request["expected_sha"],
         "command_sha256": request["command_sha256"],
         "exit_code": code, "stdout_sha256": hashlib.sha256(stdout_text.encode()).hexdigest(),
