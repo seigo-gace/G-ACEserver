@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -58,7 +59,7 @@ class TerminalHostTests(unittest.TestCase):
         endpoint = f"http://127.0.0.1:{server.server_address[1]}{terminal.RESULT_PATH}"
         return endpoint, received
 
-    def host_server(self, receive, endpoint):
+    def host_server(self, receive, endpoint, **overrides):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         handler = terminal.make_handler(
@@ -67,6 +68,7 @@ class TerminalHostTests(unittest.TestCase):
             result_dir=Path(tmp.name) / "results", lock_path=Path(tmp.name) / "lock",
             receive_delivery=receive, target_error=TargetError,
             execute=lambda request, root: None, now_fn=lambda: NOW,
+            **overrides,
         )
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -74,9 +76,11 @@ class TerminalHostTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         return server.server_address[1]
 
-    def post_host(self, port, body=b"{}", path=terminal.RECEIVER_PATH):
+    def post_host(self, port, body=b"{}", path=terminal.RECEIVER_PATH, headers=None):
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        connection.request("POST", path, body, {"content-type": "application/json"})
+        request_headers = {"content-type": "application/json"}
+        request_headers.update(headers or {})
+        connection.request("POST", path, body, request_headers)
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
@@ -136,6 +140,136 @@ class TerminalHostTests(unittest.TestCase):
             path="/not-terminal")
         self.assertEqual((status, body["error"]), (404, "NOT_FOUND"))
         self.assertEqual(calls, [])
+
+    def test_blocklisted_request_authenticates_and_skips_without_execution_or_report(self):
+        endpoint, returned = self.result_server()
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            marker = root / "reset-mode.json"
+            marker.write_text(json.dumps({
+                "schema": terminal.RESET_MARKER_SCHEMA,
+                "state": "ACTIVE",
+                "activated_at": "2026-11-24T11:00:00+09:00",
+                "reason": "owner reset",
+                "blocked_request_ids": [REQUEST_ID],
+            }), encoding="utf-8")
+            os.chmod(marker, 0o600)
+            receipts = root / "skipped"
+            calls = {"receive": 0, "verify": 0, "validate": 0}
+
+            def receive(*_args, **_kwargs):
+                calls["receive"] += 1
+                raise AssertionError("reset mode must not execute delivery")
+
+            def verify(_headers, _body, **kwargs):
+                calls["verify"] += 1
+                self.assertEqual(kwargs["expected_destination"], "gserver-bounded-host")
+
+            def validate(request, _contract):
+                calls["validate"] += 1
+                self.assertEqual(request["id"], REQUEST_ID)
+
+            request = {
+                "schema": "gace.servercore-bounded-host.request/v1",
+                "id": REQUEST_ID,
+                "command_id": "host.command",
+                "expected_sha": "a" * 40,
+                "repository": "seigo-gace/G-ACEserver",
+                "repo_sha": "b" * 40,
+                "command": "true",
+                "command_sha256": hashlib.sha256(b"true").hexdigest(),
+                "host_target": "gserver",
+            }
+            body_bytes = json.dumps(request).encode()
+            port = self.host_server(
+                receive, endpoint,
+                verify_delivery=verify,
+                validate_transport_request=validate,
+                target_config=lambda _contract: {
+                    "transport": {"destination_id": "gserver-bounded-host"},
+                },
+                reset_marker=marker,
+                reset_receipt_dir=receipts,
+            )
+            status, response = self.post_host(port, body_bytes)
+            self.assertEqual(status, 410)
+            self.assertEqual(response["error"], "GSERVER_RESET_SKIPPED")
+            self.assertEqual(calls, {"receive": 0, "verify": 1, "validate": 1})
+            self.assertEqual(returned, [])
+            receipt = json.loads((receipts / (REQUEST_ID + ".json")).read_text())
+            self.assertEqual(receipt["state"], "SKIPPED")
+            self.assertNotIn("command", receipt)
+            self.assertEqual(oct((receipts / (REQUEST_ID + ".json")).stat().st_mode & 0o777),
+                             "0o600")
+
+    def test_unblocked_request_continues_through_normal_receiver(self):
+        endpoint, _ = self.result_server()
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            marker = root / "reset-mode.json"
+            marker.write_text(json.dumps({
+                "schema": terminal.RESET_MARKER_SCHEMA,
+                "state": "ACTIVE",
+                "activated_at": "2026-11-24T11:00:00+09:00",
+                "reason": "owner reset",
+                "blocked_request_ids": ["req_" + "2" * 24],
+            }), encoding="utf-8")
+            os.chmod(marker, 0o600)
+            calls = {"receive": 0, "verify": 0, "validate": 0}
+
+            def receive(_headers, _body, **_kwargs):
+                calls["receive"] += 1
+                return {"request_id": REQUEST_ID, "state": "PASS"}
+
+            def verify(*_args, **_kwargs):
+                calls["verify"] += 1
+
+            def validate(request, _contract):
+                calls["validate"] += 1
+                self.assertEqual(request["id"], REQUEST_ID)
+
+            request = {
+                "schema": "gace.servercore-bounded-host.request/v1",
+                "id": REQUEST_ID,
+                "command_id": "host.command",
+                "expected_sha": "a" * 40,
+                "repository": "seigo-gace/G-ACEserver",
+                "repo_sha": "b" * 40,
+                "command": "true",
+                "command_sha256": hashlib.sha256(b"true").hexdigest(),
+                "host_target": "gserver",
+            }
+            port = self.host_server(
+                receive, endpoint,
+                verify_delivery=verify,
+                validate_transport_request=validate,
+                target_config=lambda _contract: {
+                    "transport": {"destination_id": "gserver-bounded-host"},
+                },
+                reset_marker=marker,
+                reset_receipt_dir=root / "skipped",
+            )
+            status, response = self.post_host(port, json.dumps(request).encode())
+            self.assertEqual(status, 200)
+            self.assertEqual(response["request_id"], REQUEST_ID)
+            self.assertEqual(calls, {"receive": 1, "verify": 1, "validate": 1})
+
+    def test_unsafe_reset_marker_fails_closed_before_execution(self):
+        endpoint, _ = self.result_server()
+        with tempfile.TemporaryDirectory() as root:
+            marker = Path(root) / "reset-mode.json"
+            marker.write_text("{}", encoding="utf-8")
+            os.chmod(marker, 0o644)
+            calls = []
+            port = self.host_server(
+                lambda *args, **kwargs: calls.append((args, kwargs)), endpoint,
+                reset_marker=marker,
+                reset_receipt_dir=Path(root) / "skipped",
+            )
+            status, response = self.post_host(port)
+            self.assertEqual((status, response["error"]),
+                             (503, "RESET_MARKER_UNSAFE"))
+            self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,9 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import secrets
+import stat
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +33,9 @@ MAX_BODY_BYTES = 1048576
 DEFAULT_ROOT = Path("/home/gace/Project/Gserver/repository")
 DEFAULT_SERVER_CORE = Path("/home/gace/server-core")
 DEFAULT_STATE = Path("/home/gace/.local/state/gserver-terminal")
+RESET_MARKER_SCHEMA = "gace.gserver-terminal-request-blocklist/v1"
+RESET_RECEIPT_SCHEMA = "gace.gserver-terminal-reset-receipt/v1"
+REQUEST_ID = re.compile(r"^req_[0-9a-f]{24}$")
 
 
 class HostBoundaryError(RuntimeError):
@@ -49,11 +54,15 @@ def load_shared_modules(server_core_root):
     if scripts_text not in sys.path:
         sys.path.insert(0, scripts_text)
     try:
-        from gace_internal_delivery_auth import read_delivery_key
-        from servercore_gserver_target import receive_delivery, target_config, GserverTargetError
+        from gace_internal_delivery_auth import read_delivery_key, verify_delivery
+        from servercore_gserver_target import (
+            receive_delivery, target_config, validate_request as validate_transport_request,
+            GserverTargetError,
+        )
     except ImportError as exc:
         raise HostBoundaryError("SERVER_CORE_MODULES_UNAVAILABLE") from exc
-    return read_delivery_key, receive_delivery, target_config, GserverTargetError
+    return (read_delivery_key, verify_delivery, receive_delivery, target_config,
+            validate_transport_request, GserverTargetError)
 
 
 def load_contract(server_core_root):
@@ -115,9 +124,93 @@ def send_result(record, *, endpoint, delivery_key, now=None, message_id=None):
     return isinstance(reply, dict) and reply.get("ok") is True
 
 
+def load_request_blocklist(path):
+    """Read an owner-private revocation list; malformed markers fail closed."""
+    path = Path(path)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return frozenset()
+    except OSError as exc:
+        raise HostBoundaryError("RESET_MARKER_UNREADABLE") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_uid != os.getuid():
+        raise HostBoundaryError("RESET_MARKER_UNSAFE")
+    if stat.S_IMODE(info.st_mode) != 0o600 or not 1 <= info.st_size <= 4096:
+        raise HostBoundaryError("RESET_MARKER_UNSAFE")
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise HostBoundaryError("RESET_MARKER_INVALID") from exc
+    if set(marker) != {"schema", "state", "activated_at", "reason",
+                       "blocked_request_ids"}:
+        raise HostBoundaryError("RESET_MARKER_INVALID")
+    if marker["schema"] != RESET_MARKER_SCHEMA or marker["state"] != "ACTIVE":
+        raise HostBoundaryError("RESET_MARKER_INVALID")
+    if not all(isinstance(marker[key], str) and marker[key].strip()
+               for key in ("activated_at", "reason")):
+        raise HostBoundaryError("RESET_MARKER_INVALID")
+    blocked = marker["blocked_request_ids"]
+    if not isinstance(blocked, list) or not blocked \
+            or not all(isinstance(value, str) and REQUEST_ID.fullmatch(value)
+                       for value in blocked) \
+            or len(set(blocked)) != len(blocked):
+        raise HostBoundaryError("RESET_MARKER_INVALID")
+    return frozenset(blocked)
+
+
+def record_reset_skip(request, body, receipt_dir, *, now=None):
+    """Persist only bounded correlation evidence; never retain the command."""
+    receipt_dir = Path(receipt_dir)
+    if receipt_dir.is_symlink():
+        raise HostBoundaryError("RESET_RECEIPT_DIR_UNSAFE")
+    receipt_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(receipt_dir, 0o700)
+    request_id = request["id"]
+    body_sha = hashlib.sha256(body).hexdigest()
+    path = receipt_dir / (request_id + ".json")
+    if path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise HostBoundaryError("RESET_RECEIPT_INVALID") from exc
+        if previous.get("body_sha256") != body_sha:
+            raise HostBoundaryError("RESET_RECEIPT_CONFLICT", 409)
+        return
+    receipt = {
+        "schema": RESET_RECEIPT_SCHEMA,
+        "state": "SKIPPED",
+        "request_id": request_id,
+        "expected_sha": request["expected_sha"],
+        "command_sha256": request["command_sha256"],
+        "body_sha256": body_sha,
+        "skipped_at": int(time.time() if now is None else now),
+    }
+    encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    temporary = receipt_dir / ("." + request_id + ".tmp-" + secrets.token_hex(8))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(receipt_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def make_handler(*, contract, request_key, result_key, result_endpoint, root,
                  result_dir, lock_path, receive_delivery, target_error,
-                 execute=execute_request, now_fn=None):
+                 execute=execute_request, now_fn=None, verify_delivery=None,
+                 validate_transport_request=None, reset_marker=None,
+                 reset_receipt_dir=None, target_config=None):
     """Build a fixed-route handler around the shared authenticated ledger."""
     class Handler(BaseHTTPRequestHandler):
         server_version = "gace-gserver-terminal-host/1"
@@ -155,6 +248,34 @@ def make_handler(*, contract, request_key, result_key, result_endpoint, root,
                     raise HostBoundaryError("BODY_SIZE_INVALID", 413)
                 body = self.rfile.read(length)
                 headers = {key.lower(): value for key, value in self.headers.items()}
+                blocked_request_ids = (load_request_blocklist(reset_marker)
+                                       if reset_marker is not None else frozenset())
+                if blocked_request_ids:
+                    if verify_delivery is None or validate_transport_request is None \
+                            or reset_receipt_dir is None or target_config is None:
+                        raise HostBoundaryError("RESET_MODE_UNAVAILABLE")
+                    target = target_config(contract)
+                    verify_delivery(
+                        headers, body,
+                        expected_destination=target["transport"]["destination_id"],
+                        delivery_key=request_key,
+                        now=now_fn() if now_fn else None,
+                    )
+                    try:
+                        request = json.loads(body.decode("utf-8"))
+                    except (UnicodeError, ValueError) as exc:
+                        raise HostBoundaryError("RESET_REQUEST_INVALID", 422) from exc
+                    validate_transport_request(request, contract)
+                    if request["id"] in blocked_request_ids:
+                        record_reset_skip(
+                            request, body, reset_receipt_dir,
+                            now=now_fn() if now_fn else None,
+                        )
+                        self.send_json(410, {
+                            "ok": False, "error": "GSERVER_RESET_SKIPPED",
+                            "request_id": request["id"],
+                        })
+                        return
                 report = lambda record: send_result(
                     record, endpoint=result_endpoint, delivery_key=result_key,
                     now=now_fn() if now_fn else None)
@@ -197,7 +318,8 @@ def main():
     args = parser.parse_args()
     if args.port < 1 or args.port > 65535:
         raise SystemExit("PORT_INVALID")
-    read_key, receive_delivery, target_config, target_error = load_shared_modules(args.server_core)
+    (read_key, verify_delivery, receive_delivery, target_config,
+     validate_transport_request, target_error) = load_shared_modules(args.server_core)
     contract = load_contract(args.server_core)
     if target_config(contract).get("status") != "HOST_ADMITTED":
         raise SystemExit("GSERVER_HOST_NOT_ADMITTED")
@@ -212,7 +334,12 @@ def main():
         contract=contract, request_key=request_key, result_key=result_key,
         result_endpoint=args.result_endpoint, root=DEFAULT_ROOT,
         result_dir=state / "results", lock_path=state / "writer.lock",
-        receive_delivery=receive_delivery, target_error=target_error))
+        receive_delivery=receive_delivery, target_error=target_error,
+        verify_delivery=verify_delivery,
+        validate_transport_request=validate_transport_request,
+        target_config=target_config,
+        reset_marker=state / "reset-mode.json",
+        reset_receipt_dir=state / "reset-skipped"))
     try:
         server.serve_forever()
     finally:
