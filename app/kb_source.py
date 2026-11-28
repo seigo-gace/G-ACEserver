@@ -224,7 +224,7 @@ def verify_existing_projection(root, authority, *, timeout_seconds=180):
     if run.returncode != 0 or "GACE_MODULECATALOG_RUNTIME_PROJECTION=PASS" not in run.stdout:
         raise KBSourceError("KB_EXISTING_PROJECTION_VERIFIER_FAILED")
     # Revalidate Current after the subprocess; a change invalidates the result.
-    current = inspect(root, verify_hashes=False, enforce_mount=False)
+    current = inspect(root, verify_hashes=True, enforce_mount=False)
     if current.get("catalog_commit") != commit or current.get("counts") != authority["counts"]:
         raise KBSourceError("KB_CURRENT_CHANGED_AFTER_PROJECTION")
     return {"projection": "EXISTING_KB_VERIFIER_PASS", "search_mcp_verified": False,
